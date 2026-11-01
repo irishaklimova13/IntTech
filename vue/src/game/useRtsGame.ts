@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import { isoToWorld, worldToIso, TILE_H, TILE_W, type Vec2 } from './iso';
-import { createBuilding, createUnit, type Entity, type Unit, type Building } from './entities';
+import { createBuilding, createUnit, type Entity, type Unit, type Building, type ICommand } from './entities';
 import { findPath } from './pathfinding';
 
 export const useRtsGame = () => {
@@ -87,11 +87,11 @@ export const useRtsGame = () => {
       const r = ent.radius * zoom.value;
       return Math.hypot(sx - pos.x, sy - bodyCY) <= r;
     }
-    
+
     const halfW = 34 * zoom.value;
     const top = pos.y - 60 * zoom.value;
     const bottom = pos.y + 16 * zoom.value;
-    
+
     return Math.abs(sx - pos.x) <= halfW && sy >= top && sy <= bottom;
   };
 
@@ -105,12 +105,16 @@ export const useRtsGame = () => {
 
   const selectAt = (sx: number, sy: number, additive = false) => {
     const hit = getEntityAt(sx, sy);
-    if (!additive) for (const e of entities) e.isSelected = false;
+    if (!additive) {
+      for (const e of entities) e.isSelected = false;
+    }
     if (hit) hit.isSelected = additive ? !hit.isSelected : true;
   };
 
   const selectInBox = (sx1: number, sy1: number, sx2: number, sy2: number, additive = false) => {
-    if (!additive) for (const e of entities) e.isSelected = false;
+    if (!additive) {
+      for (const e of entities) e.isSelected = false;
+    }
     const minX = Math.min(sx1, sx2);
     const maxX = Math.max(sx1, sx2);
     const minY = Math.min(sy1, sy2);
@@ -127,7 +131,7 @@ export const useRtsGame = () => {
     }
   };
 
-  // ===== Проверка препятствий для A* =====
+  // ===== Проверка препятствий (A*) =====
   const isBlocked = (tx: number, ty: number): boolean => {
     for (const ent of entities) {
       if (ent.kind === 'building') {
@@ -139,31 +143,117 @@ export const useRtsGame = () => {
     return false;
   };
 
+  const isPositionFree = (x: number, y: number, minDist = 0.8): boolean => {
+    if (isBlocked(Math.round(x), Math.round(y))) return false;
+    for (const e of entities) {
+      if (Math.hypot(e.x - x, e.y - y) < minDist) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  // Поиск ближайшей свободной точки рядом с целью (для атаки или стройки)
+  const findApproachPoint = (fromX: number, fromY: number, targetX: number, targetY: number, range: number): Vec2 => {
+    const dx = fromX - targetX;
+    const dy = fromY - targetY;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= range && !isBlocked(Math.round(fromX), Math.round(fromY))) {
+      return { x: fromX, y: fromY };
+    }
+    // Смещаемся от центра препятствия в сторону идущего юнита
+    const factor = Math.max(0.8, range * 0.8);
+    const testX = targetX + (dist > 0 ? (dx / dist) * factor : 1);
+    const testY = targetY + (dist > 0 ? (dy / dist) * factor : 0);
+    return { x: testX, y: testY };
+  };
+
+  // Распределение уникальных точек назначения для группы
+  const findUniqueGroupDestinations = (centerX: number, centerY: number, count: number): Vec2[] => {
+    const destinations: Vec2[] = [];
+    const minUnitSpacing = 0.85;
+
+    for (let i = 0; i < count; i++) {
+      if (i === 0 && !isBlocked(Math.round(centerX), Math.round(centerY))) {
+        destinations.push({ x: centerX, y: centerY });
+        continue;
+      }
+
+      let step = destinations.length;
+      let candidate: Vec2 | null = null;
+
+      while (!candidate && step < 300) {
+        const angle = step * 2.39996;
+        const radius = 0.7 * Math.sqrt(step);
+        const testX = centerX + Math.cos(angle) * radius;
+        const testY = centerY + Math.sin(angle) * radius;
+
+        const tileBlocked = isBlocked(Math.round(testX), Math.round(testY));
+        const overlapsReserved = destinations.some(
+          (d) => Math.hypot(d.x - testX, d.y - testY) < minUnitSpacing
+        );
+
+        if (!tileBlocked && !overlapsReserved) {
+          candidate = { x: testX, y: testY };
+        }
+        step++;
+      }
+
+      destinations.push(candidate || { x: centerX, y: centerY });
+    }
+
+    return destinations;
+  };
+
+  const assignCommand = (ent: Entity, cmd: ICommand, useQueue: boolean) => {
+    if (!ent.commandsQueue) ent.commandsQueue = [];
+
+    if (useQueue) {
+      if (!ent.activeCommand && ent.path.length === 0) {
+        ent.activeCommand = cmd;
+        let destX = cmd.x;
+        let destY = cmd.y;
+        if (cmd.type !== 'MOVE') {
+          const pt = findApproachPoint(ent.x, ent.y, cmd.x, cmd.y, 1.2);
+          destX = pt.x;
+          destY = pt.y;
+        }
+        ent.path = findPath(ent.x, ent.y, destX, destY, isBlocked);
+      } else {
+        ent.commandsQueue.push(cmd);
+      }
+    } else {
+      ent.commandsQueue = [];
+      ent.activeCommand = cmd;
+      let destX = cmd.x;
+      let destY = cmd.y;
+      if (cmd.type !== 'MOVE') {
+        const pt = findApproachPoint(ent.x, ent.y, cmd.x, cmd.y, 1.2);
+        destX = pt.x;
+        destY = pt.y;
+      }
+      if (ent.kind === 'unit') {
+        ent.path = findPath(ent.x, ent.y, destX, destY, isBlocked);
+      } else {
+        ent.path = [{ x: destX, y: destY }];
+      }
+    }
+  };
+
   // ===== Приказы (ПКМ) =====
-  const commandMoveTo = (sx: number, sy: number) => {
+  const commandMoveTo = (sx: number, sy: number, useQueue = false) => {
     const target = screenToWorld(sx, sy);
     const selectedUnits = entities.filter((e): e is Unit => e.kind === 'unit' && e.isSelected);
     const selectedBuildings = entities.filter((e): e is Building => e.kind === 'building' && e.isSelected);
 
-    // Двигаем юнитов
     if (selectedUnits.length > 0) {
+      const targets = findUniqueGroupDestinations(target.x, target.y, selectedUnits.length);
       selectedUnits.forEach((u, idx) => {
-        let tx = target.x;
-        let ty = target.y;
-
-        // Если выделено больше одного юнита, распределяем их цели по спирали
-        if (selectedUnits.length > 1) {
-          const angle = idx * 2.39996; // Золотой угол (137.5 градусов) для идеального распределения
-          const radius = 0.6 * Math.sqrt(idx); // Плавно увеличиваем радиус
-          tx += Math.cos(angle) * radius;
-          ty += Math.sin(angle) * radius;
-        }
-
-        u.path = findPath(u.x, u.y, tx, ty, isBlocked);
+        const t = targets[idx]!;
+        assignCommand(u, { type: 'MOVE', x: t.x, y: t.y }, useQueue);
       });
     }
 
-    // Переставляем домики
     if (selectedBuildings.length > 0) {
       selectedBuildings.forEach((b, idx) => {
         const a = (idx / selectedBuildings.length) * Math.PI * 2;
@@ -176,7 +266,7 @@ export const useRtsGame = () => {
         );
 
         if (!occupied) {
-          b.path = [{ x: tx, y: ty }];
+          assignCommand(b, { type: 'MOVE', x: tx, y: ty }, useQueue);
         }
       });
     }
@@ -184,7 +274,14 @@ export const useRtsGame = () => {
     markers.value.push({ id: ++markerSeq, x: target.x, y: target.y, born: performance.now() });
   };
 
-  // ===== Расталкивание юнитов (Soft Collision) =====
+  const commandAction = (type: 'ATTACK' | 'BUILD', x: number, y: number, useQueue = false, targetId?: string) => {
+    const selectedUnits = entities.filter((e): e is Unit => e.kind === 'unit' && e.isSelected);
+    selectedUnits.forEach((u) => {
+      assignCommand(u, { type, x, y, targetId }, useQueue);
+    });
+  };
+
+  // ===== Расталкивание юнитов =====
   const resolveCollisions = () => {
     const units = entities.filter((e): e is Unit => e.kind === 'unit');
     const minDist = 0.8;
@@ -205,15 +302,15 @@ export const useRtsGame = () => {
           let weight2 = 0.5;
 
           if (u1Moving && !u2Moving) {
-            weight1 = 0.1; 
-            weight2 = 0.9; 
+            weight1 = 0.1;
+            weight2 = 0.9;
           } else if (!u1Moving && u2Moving) {
-            weight1 = 0.9; 
-            weight2 = 0.1; 
+            weight1 = 0.9;
+            weight2 = 0.1;
           }
 
           const totalWeight = weight1 + weight2;
-          const push = (minDist - dist);
+          const push = minDist - dist;
           const pushX = (dx / dist) * push;
           const pushY = (dy / dist) * push;
 
@@ -228,22 +325,91 @@ export const useRtsGame = () => {
 
   // ===== Обновление (Юниты и Здания) =====
   const updateEntities = (dt: number) => {
-    for (const ent of entities) {
-      if (ent.path.length === 0) continue;
+    for (let i = entities.length - 1; i >= 0; i--) {
+      const ent = entities[i]!;
 
-      const target = ent.path[0]!;
-      const dx = target.x - ent.x;
-      const dy = target.y - ent.y;
-      const dist = Math.hypot(dx, dy);
-      const step = ent.speed * dt;
+      if (ent.path.length > 0) {
+        const target = ent.path[0]!;
+        const dx = target.x - ent.x;
+        const dy = target.y - ent.y;
+        const dist = Math.hypot(dx, dy);
+        const step = ent.speed * dt;
 
-      if (dist <= step) {
-        ent.x = target.x;
-        ent.y = target.y;
-        ent.path.shift();
-      } else {
-        ent.x += (dx / dist) * step;
-        ent.y += (dy / dist) * step;
+        if (dist <= step) {
+          ent.x = target.x;
+          ent.y = target.y;
+          ent.path.shift();
+        } else {
+          ent.x += (dx / dist) * step;
+          ent.y += (dy / dist) * step;
+        }
+
+        if (ent.path.length > 0) continue;
+      }
+
+      if (ent.activeCommand) {
+        const cmd = ent.activeCommand;
+
+        if (cmd.type === 'MOVE') {
+          ent.activeCommand = null;
+        } else if (cmd.type === 'ATTACK') {
+          const dist = Math.hypot(cmd.x - ent.x, cmd.y - ent.y);
+          const range = ent.kind === 'unit' ? ent.attackRange : 1.5;
+
+          if (dist <= range) {
+            const targetEnt = entities.find((e) =>
+              cmd.targetId ? e.id === cmd.targetId : Math.hypot(e.x - cmd.x, e.y - cmd.y) < 0.6
+            );
+            if (targetEnt) {
+              const dmg = ent.kind === 'unit' ? ent.attackDamage : 20;
+              targetEnt.hp -= dmg;
+            }
+            ent.activeCommand = null;
+          } else {
+            const pt = findApproachPoint(ent.x, ent.y, cmd.x, cmd.y, range);
+            ent.path = findPath(ent.x, ent.y, pt.x, pt.y, isBlocked);
+            if (ent.path.length === 0) ent.activeCommand = null;
+          }
+        } else if (cmd.type === 'BUILD') {
+          const dist = Math.hypot(cmd.x - ent.x, cmd.y - ent.y);
+          if (dist <= 1.5) {
+            const bx = Math.round(cmd.x);
+            const by = Math.round(cmd.y);
+            if (!isBlocked(bx, by)) {
+              entities.push(createBuilding(bx, by, ent.color));
+            }
+            ent.activeCommand = null;
+          } else {
+            const pt = findApproachPoint(ent.x, ent.y, cmd.x, cmd.y, 1.2);
+            ent.path = findPath(ent.x, ent.y, pt.x, pt.y, isBlocked);
+            if (ent.path.length === 0) ent.activeCommand = null;
+          }
+        }
+      }
+
+      if (!ent.activeCommand && ent.commandsQueue && ent.commandsQueue.length > 0) {
+        const nextCmd = ent.commandsQueue.shift()!;
+        ent.activeCommand = nextCmd;
+
+        let destX = nextCmd.x;
+        let destY = nextCmd.y;
+        if (nextCmd.type !== 'MOVE') {
+          const pt = findApproachPoint(ent.x, ent.y, nextCmd.x, nextCmd.y, 1.2);
+          destX = pt.x;
+          destY = pt.y;
+        }
+
+        if (ent.kind === 'unit') {
+          ent.path = findPath(ent.x, ent.y, destX, destY, isBlocked);
+        } else {
+          ent.path = [{ x: destX, y: destY }];
+        }
+      }
+    }
+
+    for (let i = entities.length - 1; i >= 0; i--) {
+      if (entities[i]!.hp <= 0) {
+        entities.splice(i, 1);
       }
     }
   };
@@ -283,15 +449,17 @@ export const useRtsGame = () => {
   };
 
   const init = () => {
-    entities.push(createUnit(-2, 0, '#3b82f6'));
-    entities.push(createUnit(2, 0, '#dc2626'));
-    entities.push(createUnit(0, 2, '#16a34a'));
-    entities.push(createUnit(-2, 2, '#9333ea'));
-    
-    entities.push(createBuilding(0, -2));
-    entities.push(createBuilding(3, -4));
-    entities.push(createBuilding(-3, -1));
-    entities.push(createBuilding(1, -5));
+    if (entities.length === 0) {
+      entities.push(createUnit(-2, 0, '#3b82f6'));
+      entities.push(createUnit(2, 0, '#dc2626'));
+      entities.push(createUnit(0, 2, '#16a34a'));
+      entities.push(createUnit(-2, 2, '#9333ea'));
+
+      entities.push(createBuilding(0, -2));
+      entities.push(createBuilding(3, -4));
+      entities.push(createBuilding(-3, -1));
+      entities.push(createBuilding(1, -5));
+    }
 
     lastTime = 0;
     rafId = requestAnimationFrame(loop);
@@ -309,12 +477,33 @@ export const useRtsGame = () => {
     window.removeEventListener('blur', onBlur);
   };
 
-  // ===== Публичные действия =====
-  const spawnUnit = (color = '#f97316') => {
+  const spawnUnit = (color = '#f97316'): boolean => {
     const center = isoToWorld(cameraX.value, cameraY.value);
-    const a = Math.random() * Math.PI * 2;
-    const r = 2 + Math.random() * 1.5;
-    entities.push(createUnit(center.x + Math.cos(a) * r, center.y + Math.sin(a) * r, color));
+    let targetX = 0;
+    let targetY = 0;
+    let found = false;
+
+    for (let r = 1.0; r <= 8.0; r += 0.8) {
+      const steps = Math.floor(r * 6);
+      for (let s = 0; s < steps; s++) {
+        const angle = (s / steps) * Math.PI * 2;
+        const testX = center.x + Math.cos(angle) * r;
+        const testY = center.y + Math.sin(angle) * r;
+
+        if (isPositionFree(testX, testY)) {
+          targetX = testX;
+          targetY = testY;
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
+
+    if (!found) return false;
+
+    entities.push(createUnit(targetX, targetY, color));
+    return true;
   };
 
   const cameraWorld = computed(() => {
@@ -322,7 +511,7 @@ export const useRtsGame = () => {
     return { x: Math.round(w.x * 10) / 10, y: Math.round(w.y * 10) / 10 };
   });
 
-  const zoomDisplay = computed(() => Math.round(zoom.value * 100) / 100);
+  const zoomDisplay = computed(() => `${Math.round(zoom.value * 100)}%`);
   const entityCount = computed(() => entities.length);
 
   const beginPan = (x: number, y: number) => {
@@ -350,6 +539,7 @@ export const useRtsGame = () => {
     screenToIso, isoToScreen, worldToScreen, screenToWorld,
     selectAt, selectInBox,
     commandMoveTo,
+    commandAction,
     zoomAt, resetCamera, spawnUnit,
     beginPan, movePan, endPan,
     init, destroy,

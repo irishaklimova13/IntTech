@@ -3,7 +3,7 @@
     <header class="hud-bar">
       <div class="stats">
         <span>Камера: <strong>({{ cameraWorld.x }}, {{ cameraWorld.y }})</strong></span>
-        <span>Зум: <strong>{{ zoomDisplay }}x</strong></span>
+        <span>Зум: <strong>{{ zoomDisplay }}</strong></span>
         <span>Сущностей: <strong>{{ entityCount }}</strong></span>
       </div>
       
@@ -19,9 +19,10 @@
 
       <div class="hints">
         <span>ЛКМ — Выбрать</span> ·
-        <span>Зажать ЛКМ — Рамка</span> ·
+        <span>Shift + ЛКМ — Добавить</span> ·
         <span>ПКМ — Идти</span> ·
-        <span>WASD — Камера</span>
+        <span>Shift + ПКМ — Очередь</span> ·
+        <span>WASD / Колесико — Камера</span>
       </div>
     </header>
 
@@ -38,7 +39,7 @@
       <div class="grid" :style="gridStyle"></div>
 
       <div class="world" :style="worldStyle">
-        <!-- Пути -->
+        <!-- Отрисовка активных и запланированных путей -->
         <svg class="paths-layer" width="100%" height="100%">
           <g v-for="p in unitPaths" :key="'path-' + p.id">
             <path :d="p.d" fill="none" stroke="#22c55e" stroke-width="2" stroke-dasharray="5,5" opacity="0.6" />
@@ -52,7 +53,6 @@
 
         <div v-for="m in markerViews" :key="'m' + m.id" class="marker" :style="{ left: m.left + 'px', top: m.top + 'px' }"></div>
 
-        <!-- Сущности -->
         <div v-for="v in entityViews" :key="v.id" class="entity" :style="{ left: v.left + 'px', top: v.top + 'px' }">
           <UnitSprite 
             v-if="v.ent.kind === 'unit'" 
@@ -97,7 +97,7 @@ const {
   init, destroy,
 } = game;
 
-// ===== Сетка (SVG-паттерн) =====
+// ===== Сетка =====
 const gridSvg = 
   `<svg xmlns='http://www.w3.org/2000/svg' width='${TILE_W}' height='${TILE_H}'>` +
   `<path d='M0,0 L${TILE_W},${TILE_H} M0,${TILE_H} L${TILE_W},0' stroke='#334d66' stroke-width='1' fill='none'/>` +
@@ -118,7 +118,7 @@ const gridStyle = computed(() => {
 
 const worldStyle = computed(() => ({ transform: `scale(${zoom.value})` }));
 
-// ===== Представления сущностей =====
+// ===== Сущности =====
 const entityViews = computed(() => {
   const list = entities.map((ent) => {
     const iso = worldToIso(ent.x, ent.y);
@@ -144,26 +144,34 @@ const markerViews = computed(() =>
   })
 );
 
-// ===== Линии пути =====
+// Траектории: текущая точка + путь + цель активной команды + очередь
 const unitPaths = computed(() => {
   return entities
-    .filter((e): e is Unit => e.kind === 'unit' && e.isSelected && e.path.length > 0)
+    .filter((e): e is Unit => e.kind === 'unit' && e.isSelected && (e.path.length > 0 || e.activeCommand !== null || (e.commandsQueue && e.commandsQueue.length > 0)))
     .map((u) => {
-      const points = [{ x: u.x, y: u.y }, ...u.path];
-      const screenPoints = points.map((p) => {
+      const extraPoints: { x: number; y: number }[] = [];
+      if (u.activeCommand && u.path.length === 0) {
+        extraPoints.push({ x: u.activeCommand.x, y: u.activeCommand.y });
+      }
+      (u.commandsQueue || []).forEach((c) => extraPoints.push({ x: c.x, y: c.y }));
+
+      const allPoints = [{ x: u.x, y: u.y }, ...u.path, ...extraPoints];
+
+      const screenPoints = allPoints.map((p) => {
         const iso = worldToIso(p.x, p.y);
         return {
           x: iso.x - cameraX.value + viewportW.value / 2,
           y: iso.y - cameraY.value + viewportH.value / 2,
         };
       });
+
       const d = screenPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
       const target = screenPoints[screenPoints.length - 1]!;
       return { id: u.id, d, target };
     });
 });
 
-// ===== Resize =====
+// ===== Размеры окна =====
 let ro: ResizeObserver | null = null;
 const updateSize = () => {
   const el = viewportRef.value;
@@ -172,7 +180,7 @@ const updateSize = () => {
   viewportH.value = el.clientHeight;
 };
 
-// ===== Mouse =====
+// ===== Мышь =====
 const localCoords = (e: MouseEvent) => {
   if (!viewportRef.value) return { x: 0, y: 0 };
   const rect = viewportRef.value.getBoundingClientRect();
@@ -238,7 +246,7 @@ const onMouseUp = (e: MouseEvent) => {
       else selectAt(x, y, e.shiftKey);
     }
   } else if (e.button === 2) {
-    commandMoveTo(x, y);
+    commandMoveTo(x, y, e.shiftKey);
   }
   pressedButton = -1;
 };
@@ -256,7 +264,7 @@ const onWheel = (e: WheelEvent) => {
 
 const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
-// ===== Lifecycle =====
+// ===== Жизненный цикл =====
 onMounted(() => {
   const el = viewportRef.value;
   if (!el) return;
