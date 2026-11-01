@@ -153,38 +153,42 @@ export const useRtsGame = () => {
     return true;
   };
 
-  // Поиск ближайшей свободной точки рядом с целью (для атаки или стройки)
+  // Поиск точки подхода рядом с целью (для боя / стройки)
   const findApproachPoint = (fromX: number, fromY: number, targetX: number, targetY: number, range: number): Vec2 => {
     const dx = fromX - targetX;
     const dy = fromY - targetY;
     const dist = Math.hypot(dx, dy);
+
     if (dist <= range && !isBlocked(Math.round(fromX), Math.round(fromY))) {
       return { x: fromX, y: fromY };
     }
-    // Смещаемся от центра препятствия в сторону идущего юнита
-    const factor = Math.max(0.8, range * 0.8);
+
+    const factor = Math.max(0.75, range * 0.8);
     const testX = targetX + (dist > 0 ? (dx / dist) * factor : 1);
     const testY = targetY + (dist > 0 ? (dy / dist) * factor : 0);
     return { x: testX, y: testY };
   };
 
-  // Распределение уникальных точек назначения для группы
-  const findUniqueGroupDestinations = (centerX: number, centerY: number, count: number): Vec2[] => {
+  //  Надежный поиск гарантированно уникальных точек для группы
+  const findUniqueGroupDestinations = (centerX: number, centerY: number, count: number): (Vec2 | null)[] => {
     const destinations: Vec2[] = [];
-    const minUnitSpacing = 0.85;
+    const results: (Vec2 | null)[] = [];
+    const minUnitSpacing = 0.9;
 
     for (let i = 0; i < count; i++) {
       if (i === 0 && !isBlocked(Math.round(centerX), Math.round(centerY))) {
         destinations.push({ x: centerX, y: centerY });
+        results.push({ x: centerX, y: centerY });
         continue;
       }
 
-      let step = destinations.length;
+      let step = 1;
       let candidate: Vec2 | null = null;
 
-      while (!candidate && step < 300) {
-        const angle = step * 2.39996;
-        const radius = 0.7 * Math.sqrt(step);
+      // Перебираем точки по спирали Ферма до разумного радиуса
+      while (!candidate && step < 250) {
+        const angle = step * 2.39996; // Золотой угол
+        const radius = 0.75 * Math.sqrt(step);
         const testX = centerX + Math.cos(angle) * radius;
         const testY = centerY + Math.sin(angle) * radius;
 
@@ -199,16 +203,22 @@ export const useRtsGame = () => {
         step++;
       }
 
-      destinations.push(candidate || { x: centerX, y: centerY });
+      if (candidate) {
+        destinations.push(candidate);
+        results.push(candidate);
+      } else {
+        results.push(null); // Сигнал, что юнит не получит приказ с дубликатом точки
+      }
     }
 
-    return destinations;
+    return results;
   };
 
   const assignCommand = (ent: Entity, cmd: ICommand, useQueue: boolean) => {
     if (!ent.commandsQueue) ent.commandsQueue = [];
 
     if (useQueue) {
+      // Если юнит свободен прямо сейчас, запускаем выполнение немедленно
       if (!ent.activeCommand && ent.path.length === 0) {
         ent.activeCommand = cmd;
         let destX = cmd.x;
@@ -223,6 +233,7 @@ export const useRtsGame = () => {
         ent.commandsQueue.push(cmd);
       }
     } else {
+      // Сброс старой очереди и назначение нового приказа
       ent.commandsQueue = [];
       ent.activeCommand = cmd;
       let destX = cmd.x;
@@ -249,8 +260,10 @@ export const useRtsGame = () => {
     if (selectedUnits.length > 0) {
       const targets = findUniqueGroupDestinations(target.x, target.y, selectedUnits.length);
       selectedUnits.forEach((u, idx) => {
-        const t = targets[idx]!;
-        assignCommand(u, { type: 'MOVE', x: t.x, y: t.y }, useQueue);
+        const t = targets[idx];
+        if (t !== null) {
+          assignCommand(u, { type: 'MOVE', x: t.x, y: t.y }, useQueue);
+        }
       });
     }
 
@@ -323,7 +336,7 @@ export const useRtsGame = () => {
     }
   };
 
-  // ===== Обновление (Юниты и Здания) =====
+  //Обновление с непрерывной цепочкой команд и сохранением ATTACK / BUILD
   const updateEntities = (dt: number) => {
     for (let i = entities.length - 1; i >= 0; i--) {
       const ent = entities[i]!;
@@ -344,6 +357,7 @@ export const useRtsGame = () => {
           ent.y += (dy / dist) * step;
         }
 
+        // Если в этом кадре юнит всё ещё идёт, переход к действию пока не выполняем
         if (ent.path.length > 0) continue;
       }
 
@@ -351,12 +365,14 @@ export const useRtsGame = () => {
         const cmd = ent.activeCommand;
 
         if (cmd.type === 'MOVE') {
+          // Приказ на перемещение завершен
           ent.activeCommand = null;
         } else if (cmd.type === 'ATTACK') {
           const dist = Math.hypot(cmd.x - ent.x, cmd.y - ent.y);
           const range = ent.kind === 'unit' ? ent.attackRange : 1.5;
 
           if (dist <= range) {
+            // Юнит в зоне атаки — наносим урон и завершаем действие
             const targetEnt = entities.find((e) =>
               cmd.targetId ? e.id === cmd.targetId : Math.hypot(e.x - cmd.x, e.y - cmd.y) < 0.6
             );
@@ -366,13 +382,16 @@ export const useRtsGame = () => {
             }
             ent.activeCommand = null;
           } else {
+            // Юнит ещё не дошёл: рассчитываем подход и продолжаем идти к цели
             const pt = findApproachPoint(ent.x, ent.y, cmd.x, cmd.y, range);
             ent.path = findPath(ent.x, ent.y, pt.x, pt.y, isBlocked);
             if (ent.path.length === 0) ent.activeCommand = null;
           }
         } else if (cmd.type === 'BUILD') {
           const dist = Math.hypot(cmd.x - ent.x, cmd.y - ent.y);
+
           if (dist <= 1.5) {
+            // Юнит на месте стройки — возводим здание
             const bx = Math.round(cmd.x);
             const by = Math.round(cmd.y);
             if (!isBlocked(bx, by)) {
@@ -380,6 +399,7 @@ export const useRtsGame = () => {
             }
             ent.activeCommand = null;
           } else {
+            // Продолжаем идти к площадке строительства
             const pt = findApproachPoint(ent.x, ent.y, cmd.x, cmd.y, 1.2);
             ent.path = findPath(ent.x, ent.y, pt.x, pt.y, isBlocked);
             if (ent.path.length === 0) ent.activeCommand = null;
@@ -407,6 +427,7 @@ export const useRtsGame = () => {
       }
     }
 
+    // Чистка погибших сущностей в конце кадра
     for (let i = entities.length - 1; i >= 0; i--) {
       if (entities[i]!.hp <= 0) {
         entities.splice(i, 1);
