@@ -300,6 +300,7 @@ const onMouseDown = (e: MouseEvent) => {
   downY = y;
 
   if (e.button === 0) {
+    if (selectedBuildingType.value) return;
     isSelecting.value = true;
     selStartX.value = x;
     selStartY.value = y;
