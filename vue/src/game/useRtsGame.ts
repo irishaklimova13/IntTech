@@ -3,6 +3,7 @@ import { isoToWorld, worldToIso, TILE_H, TILE_W, type Vec2 } from './iso';
 import { createBuilding, createUnit, type Entity, type Unit, type Building } from './entities';
 import { findPath } from './pathfinding';
 import { getTerrainAt, isInsideMap, findNearestTerrainTile, getMapTiles } from './terrain';
+import type { BuildingType } from './buildings';
 
 export const useRtsGame = () => {
   // ===== Состояние =====
@@ -17,6 +18,39 @@ export const useRtsGame = () => {
 
   const entities = reactive<Entity[]>([]);
   const mapTiles = getMapTiles();
+
+  const buildingOccupiesTile = (building: Building, tx: number, ty: number): boolean =>
+    tx >= Math.round(building.x) && tx < Math.round(building.x) + building.sizeTiles &&
+    ty >= Math.round(building.y) && ty < Math.round(building.y) + building.sizeTiles;
+
+  const isTileOccupied = (tx: number, ty: number, ignoredId?: string): boolean =>
+    entities.some((entity) => {
+      if (entity.id === ignoredId) return false;
+      if (entity.kind === 'building') return buildingOccupiesTile(entity, tx, ty);
+      return Math.round(entity.x) === tx && Math.round(entity.y) === ty;
+    });
+
+  const canPlaceBuilding = (type: BuildingType, x: number, y: number): boolean => {
+    const anchorX = Math.round(x);
+    const anchorY = Math.round(y);
+    for (let dx = 0; dx < type.sizeTiles; dx++) {
+      for (let dy = 0; dy < type.sizeTiles; dy++) {
+        const tx = anchorX + dx;
+        const ty = anchorY + dy;
+        if (!isInsideMap(tx, ty) || getTerrainAt(tx, ty) !== 'land' || isTileOccupied(tx, ty)) return false;
+      }
+    }
+    return true;
+  };
+
+  const placeBuilding = (type: BuildingType, x: number, y: number): Building | null => {
+    const anchorX = Math.round(x);
+    const anchorY = Math.round(y);
+    if (!canPlaceBuilding(type, anchorX, anchorY)) return null;
+    const building = createBuilding(anchorX, anchorY, type);
+    entities.push(building);
+    return building;
+  };
 
   interface Marker { id: number; x: number; y: number; born: number }
   const markers = ref<Marker[]>([]);
@@ -83,16 +117,17 @@ export const useRtsGame = () => {
 
   // ===== Хит-тест и выбор =====
   const hitTest = (ent: Entity, sx: number, sy: number): boolean => {
-    const pos = worldToScreen(ent.x, ent.y);
+    const footprintOffset = ent.kind === 'building' ? (ent.sizeTiles - 1) / 2 : 0;
+    const pos = worldToScreen(ent.x + footprintOffset, ent.y + footprintOffset);
     if (ent.kind === 'unit') {
       const bodyCY = pos.y - 17 * zoom.value;
       const r = ent.radius * zoom.value;
       return Math.hypot(sx - pos.x, sy - bodyCY) <= r;
     }
     
-    const halfW = 34 * zoom.value;
-    const top = pos.y - 60 * zoom.value;
-    const bottom = pos.y + 16 * zoom.value;
+    const halfW = 34 * ent.sizeTiles * zoom.value;
+    const top = pos.y - (60 + (ent.sizeTiles - 1) * 20) * zoom.value;
+    const bottom = pos.y + 16 * ent.sizeTiles * zoom.value;
     
     return Math.abs(sx - pos.x) <= halfW && sy >= top && sy <= bottom;
   };
@@ -134,8 +169,7 @@ export const useRtsGame = () => {
     if (!isInsideMap(tx, ty) || getTerrainAt(tx, ty) !== movementType) return true;
     return entities.some((ent) =>
       ent.kind === 'building' &&
-      Math.round(ent.x) === tx &&
-      Math.round(ent.y) === ty
+      buildingOccupiesTile(ent, tx, ty)
     );
   };
 
@@ -171,9 +205,9 @@ export const useRtsGame = () => {
         const tx = Math.round(target.x + Math.cos(a) * r);
         const ty = Math.round(target.y + Math.sin(a) * r);
 
-        const occupied = entities.some(
-          (e) => e.kind === 'building' && e.id !== b.id && Math.round(e.x) === tx && Math.round(e.y) === ty
-        );
+        const occupied = Array.from({ length: b.sizeTiles }, (_, dx) =>
+          Array.from({ length: b.sizeTiles }, (_, dy) => isTileOccupied(tx + dx, ty + dy, b.id)),
+        ).flat().some(Boolean);
 
         if (!occupied) {
           b.path = [{ x: tx, y: ty }];
@@ -323,7 +357,7 @@ export const useRtsGame = () => {
   const spawnUnit = (color = '#f97316', movementType: Unit['movementType'] = 'land') => {
     const center = isoToWorld(cameraX.value, cameraY.value);
     const spawn = findNearestTerrainTile(center.x, center.y, movementType, (x, y) =>
-      entities.some((e) => e.kind === 'building' && Math.round(e.x) === x && Math.round(e.y) === y),
+      entities.some((e) => e.kind === 'building' && buildingOccupiesTile(e, x, y)),
     );
     if (!spawn) return;
     entities.push(createUnit(spawn.x, spawn.y, color, movementType));
@@ -362,7 +396,7 @@ export const useRtsGame = () => {
     screenToIso, isoToScreen, worldToScreen, screenToWorld,
     selectAt, selectInBox,
     commandMoveTo,
-    zoomAt, resetCamera, spawnUnit,
+    zoomAt, resetCamera, spawnUnit, canPlaceBuilding, placeBuilding,
     beginPan, movePan, endPan,
     init, destroy,
   };

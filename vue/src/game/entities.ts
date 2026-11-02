@@ -21,6 +21,8 @@ export interface Unit extends BaseEntity {
 
 export interface Building extends BaseEntity {
   kind: 'building';
+  typeId: string;
+  name: string;
   sizeTiles: number;
   height3d: number;
   speed: number;
@@ -48,13 +50,26 @@ export const createUnit = (
   path: [],
 });
 
-export const createBuilding = (x: number, y: number, color = '#475569'): Building => ({
+export const createBuilding = (
+  x: number,
+  y: number,
+  characteristics: {
+    id?: string;
+    name?: string;
+    sizeTiles?: number;
+    color?: string;
+    maxHp?: number;
+    height3d?: number;
+  } = {},
+): Building => ({
   id: `building_${nextId++}`,
   kind: 'building',
-  x, y, color,
-  sizeTiles: 1,
-  height3d: 28,
-  hp: 500, maxHp: 500,
+  typeId: characteristics.id ?? 'house',
+  name: characteristics.name ?? 'Дом',
+  x, y, color: characteristics.color ?? '#475569',
+  sizeTiles: characteristics.sizeTiles ?? 1,
+  height3d: characteristics.height3d ?? 28,
+  hp: characteristics.maxHp ?? 500, maxHp: characteristics.maxHp ?? 500,
   isSelected: false,
   speed: 4,
   path: [],

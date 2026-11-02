@@ -1,8 +1,9 @@
 <template>
+  <div class="building-footprint" :style="footprintStyle"></div>
   <div class="building-shadow"></div>
   <div class="building-ring" v-if="isSelected"></div>
   
-  <div class="house">
+  <div class="house" :style="houseStyle">
     <div class="house-base"></div>
     <div class="wall-left">
       <div class="wall-door"></div>
@@ -20,9 +21,26 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue';
+
+const props = defineProps<{
   isSelected: boolean;
+  sizeTiles: number;
+  color: string;
 }>();
+
+const footprintStyle = computed(() => ({
+  width: `${64 * props.sizeTiles}px`,
+  height: `${32 * props.sizeTiles}px`,
+  left: `${-32 * props.sizeTiles}px`,
+  bottom: `${-16 * props.sizeTiles}px`,
+  backgroundColor: props.color,
+}));
+
+const houseStyle = computed(() => ({
+  transform: `scale(${1 + (props.sizeTiles - 1) * 0.45})`,
+  transformOrigin: 'bottom center',
+}));
 </script>
 
 <style scoped>
@@ -32,6 +50,14 @@ defineProps<{
   bottom: -4px; left: -40px;
   background: rgba(0, 0, 0, 0.4);
   border-radius: 50%;
+}
+
+.building-footprint {
+  position: absolute;
+  transform: rotate(26.565deg) skewX(-36.87deg) scaleY(0.707);
+  transform-origin: center;
+  opacity: 0.5;
+  filter: brightness(0.7);
 }
 
 .building-ring {
