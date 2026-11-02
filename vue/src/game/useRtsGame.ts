@@ -2,7 +2,7 @@ import { computed, ref } from 'vue';
 import { useStore } from 'vuex';
 import { isoToWorld, worldToIso, type Vec2 } from './iso';
 import { createBuilding, createUnit, type Entity, type Unit, type Building } from './entities';
-import { findNearestTerrainTile, getMapTiles, getTerrainAt, isInsideMap } from './terrain';
+import { findNearestTerrainTile } from './terrain';
 import type { GameState, GameEventPayload } from '../store/game';
 
 export const useRtsGame = () => {
@@ -17,7 +17,7 @@ export const useRtsGame = () => {
   const MAX_ZOOM = 2.5;
   const viewportW = ref(0);
   const viewportH = ref(0);
-  const mapTiles = getMapTiles();
+  const mapTiles = computed(() => gameState.value.mapTiles);
 
   interface Marker { id: number; x: number; y: number; born: number }
   const markers = ref<Marker[]>([]);
