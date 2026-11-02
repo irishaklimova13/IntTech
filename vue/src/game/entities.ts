@@ -87,7 +87,7 @@ export const createBuilding = (
   y: number,
   characteristics: Partial<BuildingType> | string = {},
 ): Building => {
-  const options = typeof characteristics === 'string'
+  const options: Partial<BuildingType> = typeof characteristics === 'string'
     ? { color: characteristics }
     : characteristics;
 
