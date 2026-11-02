@@ -13,6 +13,15 @@ export interface ICommand {
   targetId?: string;
 }
 
+export interface BuildingType {
+  id: string;
+  name: string;
+  sizeTiles: number;
+  color: string;
+  maxHp: number;
+  height3d: number;
+}
+
 export interface BaseEntity {
   id: string;
   x: number;
@@ -37,6 +46,8 @@ export interface Unit extends BaseEntity {
 
 export interface Building extends BaseEntity {
   kind: 'building';
+  typeId: string;
+  name: string;
   sizeTiles: number;
   height3d: number;
   speed: number;
@@ -71,19 +82,31 @@ export const createUnit = (
   activeCommand: null,
 });
 
-export const createBuilding = (x: number, y: number, color = '#475569'): Building => ({
-  id: `building_${nextId++}`,
-  kind: 'building',
-  x,
-  y,
-  color,
-  sizeTiles: 1,
-  height3d: 28,
-  hp: 500,
-  maxHp: 500,
-  isSelected: false,
-  speed: 4,
-  path: [],
-  commandsQueue: [],
-  activeCommand: null,
-});
+export const createBuilding = (
+  x: number,
+  y: number,
+  characteristics: Partial<BuildingType> | string = {},
+): Building => {
+  const options = typeof characteristics === 'string'
+    ? { color: characteristics }
+    : characteristics;
+
+  return {
+    id: `building_${nextId++}`,
+    kind: 'building',
+    typeId: options.id ?? 'house',
+    name: options.name ?? 'Дом',
+    x,
+    y,
+    color: options.color ?? '#475569',
+    sizeTiles: options.sizeTiles ?? 1,
+    height3d: options.height3d ?? 28,
+    hp: options.maxHp ?? 500,
+    maxHp: options.maxHp ?? 500,
+    isSelected: false,
+    speed: 4,
+    path: [],
+    commandsQueue: [],
+    activeCommand: null,
+  };
+};
