@@ -1,3 +1,6 @@
+export type TerrainType = 'land' | 'water';
+export type MovementType = TerrainType;
+
 export interface BaseEntity {
   id: string;
   x: number;
@@ -12,6 +15,7 @@ export interface Unit extends BaseEntity {
   kind: 'unit';
   speed: number;
   radius: number;
+  movementType: MovementType;
   path: { x: number; y: number }[];
 }
 
@@ -19,20 +23,26 @@ export interface Building extends BaseEntity {
   kind: 'building';
   sizeTiles: number;
   height3d: number;
-  speed: number;                  
-  path: { x: number; y: number }[]; 
+  speed: number;
+  path: { x: number; y: number }[];
 }
 
 export type Entity = Unit | Building;
 
 let nextId = 1;
 
-export const createUnit = (x: number, y: number, color = '#3b82f6'): Unit => ({
+export const createUnit = (
+  x: number,
+  y: number,
+  color = '#3b82f6',
+  movementType: MovementType = 'land',
+): Unit => ({
   id: `unit_${nextId++}`,
   kind: 'unit',
   x, y, color,
   speed: 2.5,
   radius: 14,
+  movementType,
   hp: 100, maxHp: 100,
   isSelected: false,
   path: [],
@@ -46,6 +56,6 @@ export const createBuilding = (x: number, y: number, color = '#475569'): Buildin
   height3d: 28,
   hp: 500, maxHp: 500,
   isSelected: false,
-  speed: 4,                       
-  path: [],                       
+  speed: 4,
+  path: [],
 });
