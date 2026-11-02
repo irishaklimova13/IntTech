@@ -2,7 +2,7 @@
   <div class="building-shadow"></div>
   <div class="building-ring" v-if="isSelected"></div>
   
-  <div class="house">
+  <div class="house" :style="houseStyle">
     <div class="house-base"></div>
     <div class="wall-left">
       <div class="wall-door"></div>
@@ -26,6 +26,14 @@ defineProps<{
 </script>
 
 <style scoped>
+.building-footprint {
+  position: absolute;
+  transform: rotate(26.565deg) skewX(-36.87deg) scaleY(0.707);
+  transform-origin: center;
+  opacity: 0.5;
+  filter: brightness(0.7);
+}
+
 .building-shadow {
   position: absolute;
   width: 80px; height: 40px;
@@ -68,7 +76,7 @@ defineProps<{
 
 .wall-left {
   left: -1px;
-  background: #eab308;
+  background: var(--building-color, #eab308);
   border-left: 1px solid #a16207;
   border-bottom: 1px solid #a16207;
   transform-origin: bottom left;
@@ -77,7 +85,7 @@ defineProps<{
 
 .wall-right {
   right: -1px;
-  background: #ca8a04;
+  background: color-mix(in srgb, var(--building-color, #eab308) 80%, black);
   border-right: 1px solid #854d0e;
   border-bottom: 1px solid #854d0e;
   transform-origin: bottom right;
