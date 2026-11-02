@@ -26,13 +26,14 @@ const canPlaceUnit = (unit: Unit, x: number, y: number, entities: Entity[]) => {
 };
 
 const canPlaceBuilding = (building: Building, x: number, y: number, entities: Entity[]) => {
+  const candidate = { ...building, x, y };
   for (const entity of entities) {
     if (entity.id === building.id) continue;
     if (entity.kind === 'building') {
-      if (buildingFootprintsOverlap(building, entity, BUILDING_SEPARATION)) return false;
+      if (buildingFootprintsOverlap(candidate, entity, BUILDING_SEPARATION)) return false;
       continue;
     }
-    if (distanceFromBuildingFootprint(entity.x, entity.y, building) < UNIT_BUILDING_SEPARATION - EPSILON) return false;
+    if (distanceFromBuildingFootprint(entity.x, entity.y, candidate) < UNIT_BUILDING_SEPARATION - EPSILON) return false;
   }
   return true;
 };
