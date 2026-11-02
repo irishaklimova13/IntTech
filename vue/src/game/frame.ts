@@ -1,6 +1,7 @@
 import type { Building, Entity, ICommand, Unit } from './entities';
 import type { GameEvent } from '../store/game';
 import { findPath } from './pathfinding';
+import { buildingOccupiesTile } from './buildings';
 import { getTerrainAt, isInsideMap } from './terrain';
 import { resolveEntityCollisions } from './collision';
 
@@ -9,9 +10,7 @@ const UNIT_SEPARATION = 0.8;
 const isBlockedFor = (entities: Entity[], movementType: Unit['movementType'], x: number, y: number) => {
   if (!isInsideMap(x, y) || getTerrainAt(x, y) !== movementType) return true;
   return entities.some((entity) =>
-    entity.kind === 'building' &&
-    Math.round(entity.x) === x &&
-    Math.round(entity.y) === y
+    entity.kind === 'building' && buildingOccupiesTile(entity, x, y)
   );
 };
 
