@@ -6,7 +6,7 @@ import { getMapTiles, type MapTile } from '../game/terrain';
 export type GameEventPayload =
   | { type: 'ENTITY_ADDED'; entity: Entity }
   | { type: 'ENTITY_REMOVED'; entityId: string }
-  | { type: 'MOVE_REQUESTED'; entityId: string; target: { x: number; y: number } };
+  | { type: 'MOVE_REQUESTED'; entityId: string; target: { x: number; y: number }; queued?: boolean };
 
 export type GameEvent = GameEventPayload & { id: number };
 
