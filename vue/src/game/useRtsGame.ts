@@ -231,7 +231,16 @@ export const useRtsGame = () => {
     for (const ent of entities) {
       if (ent.path.length === 0) continue;
 
-      const target = ent.path[0]!;
+      let target = ent.path[0]!;
+
+      // Recalculate immediately if a building or terrain change blocks the
+      // next waypoint after the original move order was issued.
+      if (ent.kind === 'unit' && isBlocked(Math.round(target.x), Math.round(target.y), ent.movementType)) {
+        ent.path = findPath(ent.x, ent.y, target.x, target.y, (x, y) => isBlocked(x, y, ent.movementType));
+        target = ent.path[0]!;
+        if (!target) continue;
+      }
+
       const dx = target.x - ent.x;
       const dy = target.y - ent.y;
       const dist = Math.hypot(dx, dy);
