@@ -1,6 +1,7 @@
 import type { Module } from 'vuex';
 import type { Entity } from '../game/entities';
 import { advanceFrame } from '../game/frame';
+import { getMapTiles, type MapTile } from '../game/terrain';
 
 export type GameEventPayload =
   | { type: 'ENTITY_ADDED'; entity: Entity }
@@ -10,6 +11,7 @@ export type GameEventPayload =
 export type GameEvent = GameEventPayload & { id: number };
 
 export interface GameState {
+  mapTiles: MapTile[];
   entities: Entity[];
   events: GameEvent[];
   nextEventId: number;
@@ -18,11 +20,13 @@ export interface GameState {
 const game: Module<GameState, Record<string, unknown>> = {
   namespaced: true,
   state: (): GameState => ({
+    mapTiles: getMapTiles(),
     entities: [],
     events: [],
     nextEventId: 1,
   }),
   getters: {
+    mapTiles: (state) => state.mapTiles,
     entities: (state) => state.entities,
     pendingEvents: (state) => state.events,
     selectedEntities: (state) => state.entities.filter((entity) => entity.isSelected),
