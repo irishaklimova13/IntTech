@@ -2,6 +2,7 @@ import { computed, reactive, ref } from 'vue';
 import { isoToWorld, worldToIso, TILE_H, TILE_W, type Vec2 } from './iso';
 import { createBuilding, createUnit, type Entity, type Unit, type Building } from './entities';
 import { findPath } from './pathfinding';
+import { getTerrainAt, isInsideMap, findNearestTerrainTile, getMapTiles } from './terrain';
 
 export const useRtsGame = () => {
   // ===== Состояние =====
@@ -15,6 +16,7 @@ export const useRtsGame = () => {
   const viewportH = ref(0);
 
   const entities = reactive<Entity[]>([]);
+  const mapTiles = getMapTiles();
 
   interface Marker { id: number; x: number; y: number; born: number }
   const markers = ref<Marker[]>([]);
@@ -159,7 +161,7 @@ export const useRtsGame = () => {
           ty += Math.sin(angle) * radius;
         }
 
-        u.path = findPath(u.x, u.y, tx, ty, isBlocked);
+        u.path = findPath(u.x, u.y, tx, ty, (x, y) => isBlocked(x, y, u.movementType));
       });
     }
 
@@ -345,7 +347,7 @@ export const useRtsGame = () => {
   return {
     cameraX, cameraY, zoom,
     viewportW, viewportH,
-    entities, markers,
+    entities, markers, mapTiles,
     cameraWorld, zoomDisplay, entityCount,
     screenToIso, isoToScreen, worldToScreen, screenToWorld,
     selectAt, selectInBox,
