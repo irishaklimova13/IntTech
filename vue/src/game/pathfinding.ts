@@ -4,7 +4,30 @@ export interface Point {
 }
 
 /**
+ * Checks a segment at small intervals so a route can be simplified without
+ * cutting through blocked terrain or buildings.
+ */
+const hasClearLine = (
+  from: Point,
+  to: Point,
+  isBlocked: (x: number, y: number) => boolean,
+): boolean => {
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  const steps = Math.max(1, Math.ceil(distance * 5));
+
+  for (let step = 1; step <= steps; step++) {
+    const progress = step / steps;
+    const x = from.x + (to.x - from.x) * progress;
+    const y = from.y + (to.y - from.y) * progress;
+    if (isBlocked(Math.round(x), Math.round(y))) return false;
+  }
+  return true;
+};
+
+/**
  * A* on the logical tile grid. The callback must reject every impassable tile.
+ * Clear routes are kept as one straight segment; obstacle routes are smoothed
+ * by connecting the furthest visible waypoints.
  */
 export const findPath = (
   startX: number,
@@ -40,9 +63,13 @@ export const findPath = (
     targetWasAdjusted = true;
   }
 
-  if (start.x === target.x && start.y === target.y) {
-    return [targetWasAdjusted ? target : { x: targetX, y: targetY }];
-  }
+  const finalTarget = targetWasAdjusted ? target : { x: targetX, y: targetY };
+  const actualStart = { x: startX, y: startY };
+
+  // With no obstacle in the way, the Euclidean shortest path is a straight line.
+  if (hasClearLine(actualStart, finalTarget, isBlocked)) return [finalTarget];
+
+  if (start.x === target.x && start.y === target.y) return [finalTarget];
 
   interface Node {
     x: number;
@@ -84,16 +111,35 @@ export const findPath = (
     if (!current) break;
 
     if (current.x === target.x && current.y === target.y) {
-      const path: Point[] = [];
+      const rawPath: Point[] = [];
       let node: Node | null = current;
       while (node) {
-        path.unshift({ x: node.x, y: node.y });
+        rawPath.unshift({ x: node.x, y: node.y });
         node = node.parent;
       }
-      if (path.length > 0) {
-        path[path.length - 1] = targetWasAdjusted ? target : { x: targetX, y: targetY };
+
+      const waypoints = rawPath.slice(1);
+      if (waypoints.length === 0) return [finalTarget];
+      waypoints[waypoints.length - 1] = finalTarget;
+
+      // Greedily skip intermediate A* tiles whenever a direct segment is clear.
+      const smoothed: Point[] = [];
+      let from = actualStart;
+      let index = 0;
+      while (index < waypoints.length) {
+        let furthestVisible = index;
+        for (let candidate = waypoints.length - 1; candidate >= index; candidate--) {
+          if (hasClearLine(from, waypoints[candidate]!, isBlocked)) {
+            furthestVisible = candidate;
+            break;
+          }
+        }
+        const next = waypoints[furthestVisible]!;
+        smoothed.push(next);
+        from = next;
+        index = furthestVisible + 1;
       }
-      return path.slice(1);
+      return smoothed;
     }
 
     open.delete(key(current.x, current.y));
