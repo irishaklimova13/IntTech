@@ -6,6 +6,7 @@ import { findPath } from './pathfinding';
 import { findNearestTerrainTile, getTerrainAt, isInsideMap, MAP_RADIUS } from './terrain';
 import type { GameState, GameEventPayload } from '../store/game';
 import { buildingOccupiesTile } from './buildings';
+import type { BuildingType } from './entities';
 
 export const useRtsGame = () => {
   const store = useStore();
@@ -132,6 +133,35 @@ export const useRtsGame = () => {
         entity.isSelected = true;
       }
     }
+  };
+
+  const isTileOccupied = (tileX: number, tileY: number): boolean =>
+    entities.value.some((entity) => {
+      if (entity.kind === 'building') return buildingOccupiesTile(entity, tileX, tileY);
+      return Math.round(entity.x) === tileX && Math.round(entity.y) === tileY;
+    });
+
+  const canPlaceBuilding = (type: BuildingType, x: number, y: number): boolean => {
+    const anchorX = Math.round(x);
+    const anchorY = Math.round(y);
+    for (let dx = 0; dx < type.sizeTiles; dx++) {
+      for (let dy = 0; dy < type.sizeTiles; dy++) {
+        const tileX = anchorX + dx;
+        const tileY = anchorY + dy;
+        if (!isInsideMap(tileX, tileY) || getTerrainAt(tileX, tileY) !== 'land' ||
+            isTileOccupied(tileX, tileY)) return false;
+      }
+    }
+    return true;
+  };
+
+  const placeBuilding = (type: BuildingType, x: number, y: number): Building | null => {
+    const anchorX = Math.round(x);
+    const anchorY = Math.round(y);
+    if (!canPlaceBuilding(type, anchorX, anchorY)) return null;
+    const building = createBuilding(anchorX, anchorY, type);
+    enqueue({ type: 'ENTITY_ADDED', entity: building });
+    return building;
   };
 
   const GROUP_UNIT_SPACING = 0.8;
@@ -361,7 +391,7 @@ export const useRtsGame = () => {
     cameraWorld, zoomDisplay, entityCount,
     screenToIso, isoToScreen, worldToScreen, screenToWorld,
     selectAt, selectInBox, commandMoveTo,
-    zoomAt, resetCamera, spawnUnit,
+    zoomAt, resetCamera, spawnUnit, canPlaceBuilding, placeBuilding,
     beginPan, movePan, endPan,
     init, destroy,
   };
