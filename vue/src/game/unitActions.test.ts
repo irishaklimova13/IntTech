@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { movementSpeed, createBuilding, createUnit, type Entity } from './entities';
+import { movementSpeed, createBuilding, createUnit as createDefaultUnit, type Entity } from './entities';
 import { PRODUCER_LIMIT, producerCount, buildingContains, createUnitActions as createRandomActions, type UnitEffects, spawnFromBuilding } from './unitActions';
 import type { CombatVisualEvent } from './combatVisuals';
 const createUnitActions = (entities: Entity[], effects: Record<string, UnitEffects>, onVisual?: (event: CombatVisualEvent) => void) => createRandomActions(entities, effects, onVisual, () => 1);
+
+const createUnit = (...args: Parameters<typeof createDefaultUnit>) => { const unit = createDefaultUnit(...args); unit.attackDamage = 20; return unit; };
 
 import { getTerrainAt } from './terrain';
 

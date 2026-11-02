@@ -1,14 +1,13 @@
 import { createUnit, type Building, type Entity, type Unit } from './entities';
 import { findNearestTerrainTile, getTerrainAt } from './terrain';
 import { findPath, type Point } from './pathfinding';
+import { buildingOccupiesTile, distanceFromBuildingFootprint } from './buildings';
 import type { CombatVisualEvent } from './combatVisuals';
 
 export const isEnemy = (a: Entity, b: Entity) =>
   (a.groupId ?? a.color) !== (b.groupId ?? b.color);
 
-export const buildingContains = (b: Building, x: number, y: number) =>
-  Math.abs(x - b.x) < b.sizeTiles / 2 + 0.5 &&
-  Math.abs(y - b.y) < b.sizeTiles / 2 + 0.5;
+export const buildingContains = buildingOccupiesTile;
 
 export const PRODUCER_LIMIT = 20;
 export const producerCount = (entities: Entity[], id: string) =>
@@ -18,16 +17,18 @@ export function spawnFromBuilding(entities: Entity[], building: Building): Unit 
   if (!entities.includes(building) || building.hp <= 0) return null;
   if (producerCount(entities, building.id) >= PRODUCER_LIMIT) return null;
   const movement = building.spawnType ?? 'land';
+  const centerX = building.x + (building.sizeTiles - 1) / 2;
+  const centerY = building.y + (building.sizeTiles - 1) / 2;
   const points: Point[] = [];
   const radius = Math.ceil(building.sizeTiles / 2) + 2;
   for (let dx = -radius; dx <= radius; dx++) {
     for (let dy = -radius; dy <= radius; dy++) {
-      points.push({ x: Math.round(building.x) + dx, y: Math.round(building.y) + dy });
+      points.push({ x: Math.round(centerX) + dx, y: Math.round(centerY) + dy });
     }
   }
-  points.sort((a, b) => Math.hypot(a.x - building.x, a.y - building.y) - Math.hypot(b.x - building.x, b.y - building.y));
+  points.sort((a, b) => Math.hypot(a.x - centerX, a.y - centerY) - Math.hypot(b.x - centerX, b.y - centerY));
   const place = points.find(p => getTerrainAt(p.x, p.y) === movement && !entities.some(e =>
-    e.kind === 'building' ? buildingContains(e, p.x, p.y) : Math.hypot(e.x - p.x, e.y - p.y) < 0.85,
+    e.kind === 'building' ? distanceFromBuildingFootprint(p.x, p.y, e) < 0.8 : Math.hypot(e.x - p.x, e.y - p.y) < 0.85,
   ));
   if (!place) return null;
   const unit = createUnit(place.x, place.y, building.color, movement);
@@ -51,10 +52,11 @@ export interface UnitEffects {
 }
 
 export function createUnitActions(
-  entities: Entity[], effects: Record<string, UnitEffects>,
+  initialEntities: Entity[], effects: Record<string, UnitEffects>,
   onVisual: (event: CombatVisualEvent) => void = () => {},
   random: () => number = Math.random,
 ) {
+  let entities = initialEntities;
   const medicines = new Map<string, { cooldown: number; drinking: number; hp: number; safe: number; pending: boolean }>();
   const medicine = (u: Unit) => {
     let state = medicines.get(u.id);
@@ -75,13 +77,14 @@ export function createUnitActions(
     hit: 0, rest: 0, smoke: 0, strike: 0, ultimate: 0, facingLeft: false, healing: 0,
   });
   const blocked = (u: Unit, x: number, y: number) => getTerrainAt(x, y) !== u.movementType ||
-    entities.some(e => e.kind === 'building' && buildingContains(e, x, y));
+    entities.some(e => e.kind === 'building' && distanceFromBuildingFootprint(x, y, e) < 0.8 - 0.0001);
   const distance = (u: Unit, target: Entity) => target.kind === 'unit'
     ? Math.hypot(u.x - target.x, u.y - target.y)
-    : Math.hypot(Math.max(0, Math.abs(u.x - target.x) - target.sizeTiles / 2), Math.max(0, Math.abs(u.y - target.y) - target.sizeTiles / 2));
-  const inRange = (u: Unit, target: Entity) => distance(u, target) <= 1.15;
+    : distanceFromBuildingFootprint(u.x, u.y, target);
+  const inRange = (u: Unit, target: Entity) => distance(u, target) <= (u.attackRange ?? 1.15);
   const approach = (u: Unit, target: Entity, reserve = false): Point[] => {
-    const available = (p: Point) => !blocked(u, Math.round(p.x), Math.round(p.y)) &&
+    const available = (p: Point) => getTerrainAt(Math.round(p.x), Math.round(p.y)) === u.movementType &&
+      !entities.some(e => e.kind === 'building' && distanceFromBuildingFootprint(p.x, p.y, e) < 0.8) &&
       inRange({ ...u, ...p }, target) &&
       !entities.some(e => e.kind === 'unit' && e.id !== u.id && e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) < 0.8) &&
       ![...slots].some(([id, slot]) => id !== u.id && Math.hypot(slot.point.x - p.x, slot.point.y - p.y) < 0.8);
@@ -93,9 +96,14 @@ export function createUnitActions(
         candidates.push({ x: target.x + Math.cos(angle) * 1.1, y: target.y + Math.sin(angle) * 1.1 });
       }
     } else {
-      const radius = Math.ceil(target.sizeTiles / 2) + 1;
-      for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) {
-        candidates.push({ x: Math.round(target.x) + dx, y: Math.round(target.y) + dy });
+      const left = Math.round(target.x) - 0.5;
+      const top = Math.round(target.y) - 0.5;
+      const right = left + target.sizeTiles;
+      const bottom = top + target.sizeTiles;
+      for (let i = 0; i <= target.sizeTiles * 2; i++) {
+        const offset = i / 2;
+        candidates.push({ x: left - 0.9, y: top + offset }, { x: right + 0.9, y: top + offset },
+          { x: left + offset, y: top - 0.9 }, { x: left + offset, y: bottom + 0.9 });
       }
     }
     candidates.sort((a, b) => Math.hypot(u.x - a.x, u.y - a.y) - Math.hypot(u.x - b.x, u.y - b.y));
@@ -103,7 +111,11 @@ export function createUnitActions(
     if (previous?.targetId === target.id && available(previous.point)) candidates.unshift(previous.point);
     for (const p of candidates) {
       if (!available(p)) continue;
-      const path = findPath(u.x, u.y, p.x, p.y, (x, y) => blocked(u, x, y));
+      const path = findPath(u.x, u.y, p.x, p.y, (x, y) => {
+        if (x === Math.round(p.x) && y === Math.round(p.y)) return false;
+        if (x === Math.round(u.x) && y === Math.round(u.y)) return false;
+        return blocked(u, x, y);
+      });
       if (path.length) {
         if (reserve) slots.set(u.id, { targetId: target.id, point: p });
         return path;
@@ -169,8 +181,7 @@ export function createUnitActions(
     // would make the soldier stop and immediately acquire the same opponent again.
     const validClick = !blocked(u, Math.round(target.x), Math.round(target.y)) &&
       !entities.some(e => e.kind === 'building' &&
-        Math.abs(target.x - e.x) < e.sizeTiles / 2 + 0.05 &&
-        Math.abs(target.y - e.y) < e.sizeTiles / 2 + 0.05);
+        distanceFromBuildingFootprint(target.x, target.y, e) < 0.8);
     const goal = validClick ? { ...target } : findNearestTerrainTile(target.x, target.y, u.movementType,
       (x, y) => blocked(u, x, y));
     if (!goal) return false;
@@ -276,7 +287,7 @@ export function createUnitActions(
       if (order.windup >= 0) {
         order.windup -= dt;
         if (order.windup > 0) continue;
-        const baseDamage = Math.max(0, unit.strength ?? 20);
+        const baseDamage = Math.max(0, unit.strength ?? unit.attackDamage ?? 20);
         const ultimate = baseDamage > 0 && (ultimateCooldowns.get(id) ?? 0) <= 0 && random() < 0.02;
         if (ultimate) ultimateCooldowns.set(id, 30);
         impacts.push({ attacker: unit, target, ultimate,
@@ -308,6 +319,8 @@ export function createUnitActions(
       entities.splice(i, 1);
     }
   };
-  return { attack, attackMove, move, heal, cancel, tick, effect, isAttacking: (id: string) => orders.has(id),
+  return { attack, attackMove, move, heal, cancel,
+    setEntities: (next: Entity[]) => { entities = next; },
+    isBusy: (id: string) => orders.has(id) || marches.has(id) || (medicines.get(id)?.drinking ?? 0) > 0, tick, effect, isAttacking: (id: string) => orders.has(id),
     getAttackSlot: (id: string) => slots.get(id)?.point };
 }
