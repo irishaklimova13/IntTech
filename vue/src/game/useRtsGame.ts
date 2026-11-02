@@ -132,7 +132,7 @@ export const useRtsGame = () => {
     }
   };
 
-  const commandMoveTo = (sx: number, sy: number) => {
+  const commandMoveTo = (sx: number, sy: number, queued = false) => {
     const target = screenToWorld(sx, sy);
     const selectedUnits = entities.value.filter(
       (entity): entity is Unit => entity.kind === 'unit' && entity.isSelected,
@@ -150,7 +150,7 @@ export const useRtsGame = () => {
         x += Math.cos(angle) * radius;
         y += Math.sin(angle) * radius;
       }
-      enqueue({ type: 'MOVE_REQUESTED', entityId: unit.id, target: { x, y } });
+      enqueue({ type: 'MOVE_REQUESTED', entityId: unit.id, target: { x, y }, queued });
     });
 
     selectedBuildings.forEach((building, index) => {
