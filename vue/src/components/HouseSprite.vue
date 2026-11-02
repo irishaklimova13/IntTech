@@ -1,8 +1,8 @@
 <template>
   <div class="building-shadow"></div>
   <div class="building-ring" v-if="isSelected"></div>
-  
-  <div class="house">
+
+  <div class="house" :class="{ 'is-hit': hit }" :style="{ '--team-color': color ?? '#b91c1c' }">
     <div class="house-base"></div>
     <div class="wall-left">
       <div class="wall-door"></div>
@@ -13,6 +13,7 @@
     </div>
     <div class="roof-left"></div>
     <div class="roof-right"></div>
+    <span v-if="smoke" class="heart-smoke" aria-hidden="true">♥</span>
     <div class="chimney">
       <div class="chimney-top"></div>
     </div>
@@ -22,6 +23,9 @@
 <script setup lang="ts">
 defineProps<{
   isSelected: boolean;
+  color?: string;
+  smoke?: boolean;
+  hit?: boolean;
 }>();
 </script>
 
@@ -110,7 +114,7 @@ defineProps<{
   position: absolute;
   width: 35px; height: 20px;
   bottom: 26px; left: 0px;
-  background: #b91c1c;
+  background: var(--team-color);
   border-left: 1px solid #7f1d1d;
   transform-origin: bottom left;
   transform: skewY(26.56deg);
@@ -122,7 +126,7 @@ defineProps<{
   position: absolute;
   width: 35px; height: 20px;
   bottom: 26px; right: 0px;
-  background: #991b1b;
+  background: var(--team-color); filter: brightness(.8);
   border-right: 1px solid #7f1d1d;
   transform-origin: bottom right;
   transform: skewY(-26.56deg);
@@ -147,4 +151,9 @@ defineProps<{
   border: 1px solid #27272a;
   transform: skewX(-26.56deg);
 }
+.heart-smoke { position:absolute; left:12px; bottom:53px; z-index:5; color:#fda4af; font-size:18px; pointer-events:none; animation:heart-smoke 1.5s ease-out forwards; }
+@keyframes heart-smoke { from { opacity:0; transform:translateY(0) scale(.4); } 20% { opacity:.85; } to { opacity:0; transform:translate(10px,-38px) scale(1.3); } }
+@media (prefers-reduced-motion: reduce) { .heart-smoke { animation:none; } }
+.house.is-hit { animation:building-hit .35s ease-out; }
+@keyframes building-hit { 25% { transform:translateX(-2px); filter:brightness(1.4); } 60% { transform:translateX(2px); } }
 </style>

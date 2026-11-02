@@ -9,19 +9,25 @@ export interface BaseEntity {
   hp: number;
   maxHp: number;
   color: string;
+  // Optional integration point for the team's faction implementation.
+  groupId?: string | number;
 }
 
 export interface Unit extends BaseEntity {
   kind: 'unit';
+  producerId?: string;
   speed: number;
   radius: number;
   movementType: MovementType;
+  strength?: number;
+  attackSpeed?: number; // attacks per second
   path: { x: number; y: number }[];
 }
 
 export interface Building extends BaseEntity {
   kind: 'building';
   sizeTiles: number;
+  spawnType?: MovementType;
   height3d: number;
   speed: number;
   path: { x: number; y: number }[];
@@ -59,3 +65,9 @@ export const createBuilding = (x: number, y: number, color = '#475569'): Buildin
   speed: 4,
   path: [],
 });
+
+// Wounds affect actual movement without overwriting the base speed statistic.
+export const movementSpeed = (unit: Unit): number => {
+  const health = Math.max(0, Math.min(1, unit.hp / Math.max(1, unit.maxHp)));
+  return unit.speed * (0.5 + health * 0.5);
+};

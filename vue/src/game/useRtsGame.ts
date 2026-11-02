@@ -1,10 +1,13 @@
 import { computed, reactive, ref } from 'vue';
 import { isoToWorld, worldToIso, TILE_H, TILE_W, type Vec2 } from './iso';
-import { createBuilding, createUnit, type Entity, type Unit, type Building } from './entities';
+import { movementSpeed, createBuilding, createUnit, type Entity, type Unit, type Building } from './entities';
 import { findPath } from './pathfinding';
-import { getTerrainAt, isInsideMap, findNearestTerrainTile, getMapTiles } from './terrain';
+import { getTerrainAt, isInsideMap, getMapTiles } from './terrain';
+import { PRODUCER_LIMIT, producerCount, buildingContains, createUnitActions, spawnFromBuilding, type UnitEffects } from './unitActions';
 
-export const useRtsGame = () => {
+import { createCombatVisuals, type CombatVisual } from './combatVisuals';
+
+export const useRtsGame = (random: () => number = Math.random) => {
   // ===== Состояние =====
   const cameraX = ref(0);
   const cameraY = ref(0);
@@ -17,6 +20,20 @@ export const useRtsGame = () => {
 
   const entities = reactive<Entity[]>([]);
   const mapTiles = getMapTiles();
+  const effects = reactive<Record<string, UnitEffects>>({});
+  const combatVisuals = reactive<CombatVisual[]>([]);
+  const visuals = createCombatVisuals(combatVisuals);
+  const unitActions = createUnitActions(entities, effects, visuals.add, random);
+  const spawnMessage = ref('');
+  const healMessage = ref('');
+  const healSelected = () => {
+    const chosen = entities.filter((e): e is Unit => e.kind === 'unit' && e.isSelected);
+    const count = chosen.filter(u => unitActions.heal(u)).length;
+    healMessage.value = count ? 'Лечение началось.' : 'Нужен раненый юнит без врагов рядом. Перерыв между лекарствами — 12 с.';
+  };
+  const attackMoveMode = ref(false);
+  const selectedProducerCount = computed(() => selectedBuilding.value ? producerCount(entities, selectedBuilding.value.id) : 0);
+  const selectedBuilding = computed(() => entities.find((e): e is Building => e.kind === 'building' && e.isSelected));
 
   interface Marker { id: number; x: number; y: number; born: number }
   const markers = ref<Marker[]>([]);
@@ -98,8 +115,9 @@ export const useRtsGame = () => {
   };
 
   const getEntityAt = (sx: number, sy: number): Entity | null => {
-    for (let i = entities.length - 1; i >= 0; i--) {
-      const ent = entities[i]!;
+    // Match the renderer's depth order so a roof cannot steal a click on a soldier in front.
+    const frontToBack = [...entities].sort((a, b) => (b.x + b.y) - (a.x + a.y));
+    for (const ent of frontToBack) {
       if (hitTest(ent, sx, sy)) return ent;
     }
     return null;
@@ -134,13 +152,22 @@ export const useRtsGame = () => {
     if (!isInsideMap(tx, ty) || getTerrainAt(tx, ty) !== movementType) return true;
     return entities.some((ent) =>
       ent.kind === 'building' &&
-      Math.round(ent.x) === tx &&
-      Math.round(ent.y) === ty
+      buildingContains(ent, tx, ty)
     );
   };
 
   // ===== Приказы (ПКМ) =====
-  const commandMoveTo = (sx: number, sy: number) => {
+  const commandMoveTo = (sx: number, sy: number, withAttack = false) => {
+    const hit = getEntityAt(sx, sy);
+    // The button arms one order; it must not turn later retreat clicks into attacks.
+    const aggressiveMove = withAttack || attackMoveMode.value;
+    attackMoveMode.value = false;
+    const chosen = entities.filter((e): e is Unit => e.kind === 'unit' && e.isSelected);
+    if (hit) {
+      for (const unit of chosen) unitActions.attack(unit, hit);
+      return;
+    }
+    for (const unit of chosen) unitActions.cancel(unit);
     const target = screenToWorld(sx, sy);
     const selectedUnits = entities.filter((e): e is Unit => e.kind === 'unit' && e.isSelected);
     const selectedBuildings = entities.filter((e): e is Building => e.kind === 'building' && e.isSelected);
@@ -159,7 +186,8 @@ export const useRtsGame = () => {
           ty += Math.sin(angle) * radius;
         }
 
-        u.path = findPath(u.x, u.y, tx, ty, (x, y) => isBlocked(x, y, u.movementType));
+        if (aggressiveMove) unitActions.attackMove(u, { x: tx, y: ty });
+        else unitActions.move(u, { x: tx, y: ty });
       });
     }
 
@@ -184,6 +212,11 @@ export const useRtsGame = () => {
     markers.value.push({ id: ++markerSeq, x: target.x, y: target.y, born: performance.now() });
   };
 
+  const canStand = (unit: Unit, x: number, y: number) =>
+    getTerrainAt(Math.round(x), Math.round(y)) === unit.movementType &&
+    !entities.some(e => e.kind === 'building' &&
+      Math.abs(x - e.x) < e.sizeTiles / 2 + 0.05 && Math.abs(y - e.y) < e.sizeTiles / 2 + 0.05);
+
   // ===== Расталкивание юнитов (Soft Collision) =====
   const resolveCollisions = () => {
     const units = entities.filter((e): e is Unit => e.kind === 'unit');
@@ -193,11 +226,11 @@ export const useRtsGame = () => {
       for (let j = i + 1; j < units.length; j++) {
         const u1 = units[i]!;
         const u2 = units[j]!;
-        const dx = u2.x - u1.x;
+        const dx = u2.x === u1.x && u2.y === u1.y ? 1 : u2.x - u1.x;
         const dy = u2.y - u1.y;
-        const dist = Math.hypot(dx, dy);
+        const dist = Math.hypot(u2.x - u1.x, u2.y - u1.y);
 
-        if (dist > 0 && dist < minDist) {
+        if (dist < minDist) {
           const u1Moving = u1.path.length > 0;
           const u2Moving = u2.path.length > 0;
 
@@ -214,13 +247,15 @@ export const useRtsGame = () => {
 
           const totalWeight = weight1 + weight2;
           const push = (minDist - dist);
-          const pushX = (dx / dist) * push;
-          const pushY = (dy / dist) * push;
+          const pushX = (dx / (dist || 1)) * push;
+          const pushY = (dy / (dist || 1)) * push;
 
-          u1.x -= pushX * (weight1 / totalWeight);
-          u1.y -= pushY * (weight1 / totalWeight);
-          u2.x += pushX * (weight2 / totalWeight);
-          u2.y += pushY * (weight2 / totalWeight);
+          const x1 = u1.x - pushX * (weight1 / totalWeight);
+          const y1 = u1.y - pushY * (weight1 / totalWeight);
+          const x2 = u2.x + pushX * (weight2 / totalWeight);
+          const y2 = u2.y + pushY * (weight2 / totalWeight);
+          if (canStand(u1, x1, y1)) { u1.x = x1; u1.y = y1; }
+          if (canStand(u2, x2, y2)) { u2.x = x2; u2.y = y2; }
         }
       }
     }
@@ -231,6 +266,20 @@ export const useRtsGame = () => {
     for (const ent of entities) {
       if (ent.path.length === 0) continue;
 
+      // In a column, soldiers need not reach the exact same intermediate tile center.
+      // Only skip a nearby waypoint when the entire shortcut is passable.
+      if (ent.kind === 'unit' && ent.path.length > 1) {
+        const first = ent.path[0]!;
+        const next = ent.path[1]!;
+        if (Math.hypot(first.x - ent.x, first.y - ent.y) < 1.0) {
+          const samples = Math.ceil(Math.hypot(next.x - ent.x, next.y - ent.y) / 0.1);
+          let clear = true;
+          for (let i = 1; i <= samples; i++) {
+            if (!canStand(ent, ent.x + (next.x - ent.x) * i / samples, ent.y + (next.y - ent.y) * i / samples)) { clear = false; break; }
+          }
+          if (clear) ent.path.shift();
+        }
+      }
       let target = ent.path[0]!;
 
       // Recalculate immediately if a building or terrain change blocks the
@@ -244,8 +293,11 @@ export const useRtsGame = () => {
       const dx = target.x - ent.x;
       const dy = target.y - ent.y;
       const dist = Math.hypot(dx, dy);
-      const step = ent.speed * dt;
+      const step = (ent.kind === 'unit' ? movementSpeed(ent) : ent.speed) * dt;
 
+      const nextX = dist <= step ? target.x : ent.x + (dx / dist) * step;
+      const nextY = dist <= step ? target.y : ent.y + (dy / dist) * step;
+      if (ent.kind === 'unit' && !canStand(ent, nextX, nextY)) { ent.path = []; continue; }
       if (dist <= step) {
         ent.x = target.x;
         ent.y = target.y;
@@ -268,6 +320,8 @@ export const useRtsGame = () => {
     lastTime = time;
 
     updateCameraFromKeys(dt);
+    visuals.tick(dt);
+    unitActions.tick(dt);
     updateEntities(dt);
     resolveCollisions();
     cleanupMarkers();
@@ -298,10 +352,12 @@ export const useRtsGame = () => {
     entities.push(createUnit(-2, 2, '#9333ea', 'land'));
     entities.push(createUnit(5, 4, '#38bdf8', 'water'));
     
-    entities.push(createBuilding(0, -2));
-    entities.push(createBuilding(3, -4));
-    entities.push(createBuilding(-3, -1));
-    entities.push(createBuilding(1, -5));
+    entities.push(createBuilding(0, -2, '#3b82f6'));
+    entities.push(createBuilding(3, -4, '#dc2626'));
+    entities.push(createBuilding(-3, -1, '#16a34a'));
+    const harbor = createBuilding(2, 4, '#38bdf8');
+    harbor.spawnType = 'water';
+    entities.push(harbor);
 
     lastTime = 0;
     rafId = requestAnimationFrame(loop);
@@ -320,13 +376,14 @@ export const useRtsGame = () => {
   };
 
   // ===== Публичные действия =====
-  const spawnUnit = (color = '#f97316', movementType: Unit['movementType'] = 'land') => {
-    const center = isoToWorld(cameraX.value, cameraY.value);
-    const spawn = findNearestTerrainTile(center.x, center.y, movementType, (x, y) =>
-      entities.some((e) => e.kind === 'building' && Math.round(e.x) === x && Math.round(e.y) === y),
-    );
-    if (!spawn) return;
-    entities.push(createUnit(spawn.x, spawn.y, color, movementType));
+  const spawnUnit = () => {
+    const building = selectedBuilding.value;
+    if (!building) return;
+    const unit = spawnFromBuilding(entities, building);
+    spawnMessage.value = unit ? '' : producerCount(entities, building.id) >= PRODUCER_LIMIT
+      ? 'Лимит этой казармы достигнут: 20 живых юнитов.'
+      : 'Рядом нет свободного места подходящего типа.';
+    if (unit) unitActions.effect(building.id).smoke = 1.5;
   };
 
   const cameraWorld = computed(() => {
@@ -357,7 +414,8 @@ export const useRtsGame = () => {
   return {
     cameraX, cameraY, zoom,
     viewportW, viewportH,
-    entities, markers, mapTiles,
+    entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, spawnMessage,
+    isAttacking: unitActions.isAttacking, healSelected, healMessage, attackMoveMode, selectedProducerCount, PRODUCER_LIMIT,
     cameraWorld, zoomDisplay, entityCount,
     screenToIso, isoToScreen, worldToScreen, screenToWorld,
     selectAt, selectInBox,

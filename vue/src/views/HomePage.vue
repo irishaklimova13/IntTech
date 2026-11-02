@@ -8,20 +8,22 @@
       </div>
       
       <div class="actions">
-        <span class="spawn-label">+ Создать:</span>
-        <button class="btn-blue" title="Синий юнит" @click="spawnUnit('#3b82f6')"></button>
-        <button class="btn-red" title="Красный юнит" @click="spawnUnit('#dc2626')"></button>
-        <button class="btn-green" title="Зеленый юнит" @click="spawnUnit('#16a34a')"></button>
-        <button class="btn-purple" title="Фиолетовый юнит" @click="spawnUnit('#9333ea')"></button>
-        <button class="btn-orange" title="Оранжевый юнит (суша)" @click="spawnUnit('#f97316')"></button>
-        <button class="btn-water" title="Создать водного юнита" @click="spawnUnit('#38bdf8', 'water')">⛵</button>
+        <template v-if="selectedBuilding">
+          <span class="spawn-label">{{ selectedBuilding.spawnType === 'water' ? 'Причал' : 'Казарма' }} · {{ selectedProducerCount }}/{{ PRODUCER_LIMIT }}</span>
+          <button class="btn-reset" :disabled="selectedProducerCount >= PRODUCER_LIMIT" @click="spawnUnit()">Создать {{ selectedBuilding.spawnType === 'water' ? 'водного юнита' : 'солдата' }}</button>
+        </template>
+        <span v-else class="spawn-label">Выберите здание для спавна</span>
+        <span role="status">{{ spawnMessage }}</span>
+        <button class="btn-reset" title="35% HP за 2 с. Враги должны быть дальше 3 клеток. Перерыв 12 с." @click="healSelected">Выпить лекарство</button>
+        <span role="status" class="heal-message">{{ healMessage }}</span>
+        <button class="btn-reset" title="Следующий приказ движения будет с атакой" :aria-pressed="attackMoveMode" :class="{ 'mode-active': attackMoveMode }" @click="attackMoveMode = !attackMoveMode">Идти с атакой</button>
         <button class="btn-reset" @click="resetCamera">Центр</button>
       </div>
 
       <div class="hints">
         <span>ЛКМ — Выбрать</span> ·
         <span>Зажать ЛКМ — Рамка</span> ·
-        <span>ПКМ — Идти</span> ·
+        <span>ПКМ — Идти / атаковать · Ctrl+ПКМ — Идти с атакой</span> ·
         <span>Суша / вода — разные юниты</span> ·
         <span>WASD — Камера</span>
       </div>
@@ -57,19 +59,35 @@
 
         <div v-for="m in markerViews" :key="'m' + m.id" class="marker" :style="{ left: m.left + 'px', top: m.top + 'px' }"></div>
 
+        <div v-for="fx in combatVisualViews" :key="'combat-' + fx.id" class="combat-visual" :class="fx.kind" :style="{ left: fx.left + 'px', top: fx.top + 'px', opacity: fx.kind === 'death' ? Math.min(1, fx.ttl / 2) : 1 }">
+          <CombatRemains :kind="fx.kind" :color="fx.color" :seed="fx.id" :ultimate="fx.ultimate" />
+        </div>
         <!-- Сущности -->
         <div v-for="v in entityViews" :key="v.id" class="entity" :style="{ left: v.left + 'px', top: v.top + 'px' }">
           <UnitSprite 
             v-if="v.ent.kind === 'unit'" 
             :color="v.ent.color" 
             :is-moving="v.ent.path.length > 0" 
-            :is-selected="v.ent.isSelected" 
+            :is-selected="v.ent.isSelected"
+            :hit="(effects[v.id]?.hit ?? 0) > 0"
+            :rest="(effects[v.id]?.rest ?? 0) > 0 && v.ent.path.length === 0"
+            :strike="(effects[v.id]?.strike ?? 0) > 0"
+            :facing-left="effects[v.id]?.facingLeft"
+            :healing="(effects[v.id]?.healing ?? 0) > 0"
+            :ultimate="(effects[v.id]?.ultimate ?? 0) > 0"
           />
           
           <HouseSprite 
             v-else-if="v.ent.kind === 'building'" 
-            :is-selected="v.ent.isSelected" 
+            :is-selected="v.ent.isSelected"
+            :color="v.ent.color"
+            :smoke="(effects[v.id]?.smoke ?? 0) > 0"
+            :hit="(effects[v.id]?.hit ?? 0) > 0"
           />
+          <div v-if="v.ent.isSelected || v.ent.hp < v.ent.maxHp" class="health" :class="{ 'building-health': v.ent.kind === 'building' }" :title="`${v.ent.hp} / ${v.ent.maxHp} HP`">
+            <div :style="{ width: `${100 * v.ent.hp / v.ent.maxHp}%`, backgroundColor: v.ent.color }"></div>
+          </div>
+          <span v-if="v.ent.kind === 'unit' && isAttacking(v.id)" class="attack-indicator" aria-label="Атакует">⚔</span>
         </div>
       </div>
 
@@ -85,6 +103,7 @@ import { worldToIso, TILE_H, TILE_W } from '../game/iso';
 import type { Unit } from '../game/entities';
 import UnitSprite from '../components/UnitSprite.vue';
 import HouseSprite from '../components/HouseSprite.vue';
+import CombatRemains from '../components/CombatRemains.vue';
 
 const viewportRef = ref<HTMLDivElement | null>(null);
 
@@ -92,7 +111,7 @@ const game = useRtsGame();
 const {
   cameraX, cameraY, zoom,
   viewportW, viewportH,
-  entities, markers, mapTiles,
+  entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, spawnMessage, isAttacking, attackMoveMode, selectedProducerCount, PRODUCER_LIMIT, healSelected, healMessage,
   cameraWorld, zoomDisplay, entityCount,
   zoomAt,
   resetCamera, spawnUnit,
@@ -142,6 +161,12 @@ const entityViews = computed(() => {
   list.sort((a, b) => a.top - b.top);
   return list;
 });
+
+const combatVisualViews = computed(() => combatVisuals.map(fx => {
+  const iso = worldToIso(fx.x, fx.y);
+  return { ...fx, left: iso.x - cameraX.value + viewportW.value / 2,
+    top: iso.y - cameraY.value + viewportH.value / 2 };
+}));
 
 const markerViews = computed(() =>
   markers.value.map((m) => {
@@ -248,7 +273,7 @@ const onMouseUp = (e: MouseEvent) => {
       else selectAt(x, y, e.shiftKey);
     }
   } else if (e.button === 2) {
-    commandMoveTo(x, y);
+    commandMoveTo(x, y, e.ctrlKey);
   }
   pressedButton = -1;
 };
@@ -289,9 +314,17 @@ onUnmounted(() => {
   font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
+.combat-visual { position:absolute; pointer-events:none; z-index:1; }
+.combat-visual.ultimate { z-index:1; }
+.combat-visual.hit { z-index:5; }
+.heal-message { font-size:11px; max-width:250px; white-space:normal; color:#86efac; }
+.health { position:absolute; top:-48px; left:-18px; width:36px; height:4px; border:1px solid #94a3b8; background:#172033; border-radius:3px; overflow:hidden; }
+.health > div { height:100%; }
+.building-health { top:-72px; }
+.attack-indicator { position:absolute; left:18px; top:-38px; color:#fbbf24; font-size:14px; }
 .hud-bar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 20px; height: 60px; flex-shrink: 0;
+  padding: 10px 20px; min-height: 60px; flex-wrap: wrap; gap: 10px; flex-shrink: 0;
   background: #1e293b; border-bottom: 2px solid #334155; font-size: 14px; z-index: 10;
 }
 .stats, .actions, .hints { display: flex; align-items: center; white-space: nowrap; }
@@ -314,6 +347,8 @@ onUnmounted(() => {
   width: auto !important; height: 30px !important; border-radius: 4px !important;
   background: #475569; color: #fff; padding: 0 12px !important; font-family: inherit; font-weight: bold;
 }
+.actions button:disabled { opacity:.4; cursor:not-allowed; transform:none; }
+.actions .mode-active { background:#166534; border-color:#4ade80; }
 .btn-reset:hover { background: #334155; transform: none !important; }
 
 .viewport { flex: 1; position: relative; overflow: hidden; background: #111827; cursor: crosshair; touch-action: none; }
