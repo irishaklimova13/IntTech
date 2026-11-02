@@ -1,4 +1,4 @@
-import type { Building, Entity, Unit } from './entities';
+import type { Building, Entity, ICommand, Unit } from './entities';
 import type { GameEvent } from '../store/game';
 import { findPath } from './pathfinding';
 import { getTerrainAt, isInsideMap } from './terrain';
@@ -13,6 +13,37 @@ const isBlockedFor = (entities: Entity[], movementType: Unit['movementType'], x:
     Math.round(entity.x) === x &&
     Math.round(entity.y) === y
   );
+};
+
+const findUnitPath = (unit: Unit, target: { x: number; y: number }, entities: Entity[]) =>
+  findPath(
+    unit.x,
+    unit.y,
+    target.x,
+    target.y,
+    (x, y) => isBlockedFor(entities, unit.movementType, x, y),
+  );
+
+const startMoveCommand = (unit: Unit, command: ICommand, entities: Entity[]) => {
+  unit.activeCommand = command;
+  unit.path = findUnitPath(unit, command, entities);
+  if (unit.path.length === 0) unit.activeCommand = null;
+};
+
+const startNextQueuedCommand = (unit: Unit, entities: Entity[]) => {
+  while (!unit.activeCommand && unit.commandsQueue.length > 0) {
+    const nextCommand = unit.commandsQueue.shift()!;
+    if (nextCommand.type === 'MOVE') {
+      startMoveCommand(unit, nextCommand, entities);
+    }
+    // ATTACK and BUILD will be handled when those command types are integrated.
+  }
+};
+
+const finishMoveCommandIfNeeded = (unit: Unit, entities: Entity[]) => {
+  if (unit.path.length > 0) return;
+  if (unit.activeCommand) unit.activeCommand = null;
+  startNextQueuedCommand(unit, entities);
 };
 
 const isBuildingPositionFree = (building: Building, x: number, y: number, entities: Entity[]) =>
@@ -39,7 +70,12 @@ const applyEvents = (entities: Entity[], events: GameEvent[]) => {
     switch (event.type) {
       case 'ENTITY_ADDED':
         if (!entities.some((entity) => entity.id === event.entity.id)) {
-          entities.push({ ...event.entity, path: [...event.entity.path] });
+          entities.push({
+            ...event.entity,
+            path: event.entity.path.map((point) => ({ ...point })),
+            commandsQueue: event.entity.commandsQueue.map((command) => ({ ...command })),
+            activeCommand: event.entity.activeCommand ? { ...event.entity.activeCommand } : null,
+          });
         }
         break;
       case 'ENTITY_REMOVED': {
@@ -51,13 +87,17 @@ const applyEvents = (entities: Entity[], events: GameEvent[]) => {
         const entity = entities.find((item) => item.id === event.entityId);
         if (!entity) break;
         if (entity.kind === 'unit') {
-          entity.path = findPath(
-            entity.x,
-            entity.y,
-            event.target.x,
-            event.target.y,
-            (x, y) => isBlockedFor(entities, entity.movementType, x, y),
-          );
+          const command: ICommand = { type: 'MOVE', x: event.target.x, y: event.target.y };
+          if (event.queued && (entity.activeCommand || entity.path.length > 0)) {
+            entity.commandsQueue.push(command);
+          } else {
+            if (!event.queued) entity.commandsQueue = [];
+            if (entity.activeCommand || entity.path.length > 0) {
+              entity.commandsQueue.push(command);
+            } else {
+              startMoveCommand(entity, command, entities);
+            }
+          }
         } else {
           const x = Math.round(event.target.x);
           const y = Math.round(event.target.y);
@@ -104,6 +144,9 @@ const findSafeUnitStep = (
 
 const advanceMovement = (entities: Entity[], deltaSeconds: number) => {
   for (const entity of entities) {
+    if (entity.kind === 'unit' && entity.path.length === 0) {
+      finishMoveCommandIfNeeded(entity, entities);
+    }
     if (entity.path.length === 0) continue;
 
     let target = entity.path[0]!;
@@ -113,15 +156,12 @@ const advanceMovement = (entities: Entity[], deltaSeconds: number) => {
       Math.round(target.x),
       Math.round(target.y),
     )) {
-      entity.path = findPath(
-        entity.x,
-        entity.y,
-        target.x,
-        target.y,
-        (x, y) => isBlockedFor(entities, entity.movementType, x, y),
-      );
+      entity.path = findUnitPath(entity, target, entities);
       target = entity.path[0]!;
-      if (!target) continue;
+      if (!target) {
+        finishMoveCommandIfNeeded(entity, entities);
+        continue;
+      }
     }
 
     const dx = target.x - entity.x;
@@ -134,6 +174,7 @@ const advanceMovement = (entities: Entity[], deltaSeconds: number) => {
       entity.x = next.x;
       entity.y = next.y;
       if (next.direct && (distance <= step || distance < 0.0001)) entity.path.shift();
+      if (entity.path.length === 0) finishMoveCommandIfNeeded(entity, entities);
       continue;
     }
 
@@ -163,6 +204,8 @@ export const advanceFrame = (
   const entities = currentEntities.map((entity) => ({
     ...entity,
     path: entity.path.map((point) => ({ ...point })),
+    commandsQueue: entity.commandsQueue.map((command) => ({ ...command })),
+    activeCommand: entity.activeCommand ? { ...entity.activeCommand } : null,
   }));
   applyEvents(entities, pendingEvents);
   advanceMovement(entities, Math.max(0, Math.min(deltaSeconds, 0.1)));
