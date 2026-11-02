@@ -1,7 +1,7 @@
 import type { Building, Entity, ICommand, Unit } from './entities';
 import type { GameEvent } from '../store/game';
 import { findPath } from './pathfinding';
-import { buildingOccupiesTile } from './buildings';
+import { buildingFootprintsOverlap, buildingOccupiesTile, distanceFromBuildingFootprint } from './buildings';
 import { getTerrainAt, isInsideMap } from './terrain';
 import { resolveEntityCollisions } from './collision';
 
@@ -45,12 +45,14 @@ const finishMoveCommandIfNeeded = (unit: Unit, entities: Entity[]) => {
   startNextQueuedCommand(unit, entities);
 };
 
-const isBuildingPositionFree = (building: Building, x: number, y: number, entities: Entity[]) =>
-  entities.every((entity) => {
+const isBuildingPositionFree = (building: Building, x: number, y: number, entities: Entity[]) => {
+  const candidate = { ...building, x, y };
+  return entities.every((entity) => {
     if (entity.id === building.id) return true;
-    const requiredDistance = entity.kind === 'building' ? 1 : 0.8;
-    return Math.hypot(x - entity.x, y - entity.y) >= requiredDistance;
+    if (entity.kind === 'building') return !buildingFootprintsOverlap(candidate, entity, 1);
+    return distanceFromBuildingFootprint(entity.x, entity.y, candidate) >= 0.8;
   });
+};
 
 const isUnitPositionFree = (unit: Unit, x: number, y: number, entities: Entity[]) => {
   if (!isInsideMap(Math.round(x), Math.round(y)) ||
