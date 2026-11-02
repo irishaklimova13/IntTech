@@ -1,6 +1,27 @@
 export type TerrainType = 'land' | 'water';
 export type MovementType = TerrainType;
 
+export interface PathNode {
+  x: number;
+  y: number;
+}
+
+export interface ICommand {
+  type: 'MOVE' | 'ATTACK' | 'BUILD';
+  x: number;
+  y: number;
+  targetId?: string;
+}
+
+export interface BuildingType {
+  id: string;
+  name: string;
+  sizeTiles: number;
+  color: string;
+  maxHp: number;
+  height3d: number;
+}
+
 export interface BaseEntity {
   id: string;
   x: number;
@@ -9,6 +30,8 @@ export interface BaseEntity {
   hp: number;
   maxHp: number;
   color: string;
+  commandsQueue: ICommand[];
+  activeCommand: ICommand | null;
 }
 
 export interface Unit extends BaseEntity {
@@ -16,15 +39,19 @@ export interface Unit extends BaseEntity {
   speed: number;
   radius: number;
   movementType: MovementType;
-  path: { x: number; y: number }[];
+  path: PathNode[];
+  attackDamage: number;
+  attackRange: number;
 }
 
 export interface Building extends BaseEntity {
   kind: 'building';
+  typeId: string;
+  name: string;
   sizeTiles: number;
   height3d: number;
   speed: number;
-  path: { x: number; y: number }[];
+  path: PathNode[];
 }
 
 export type Entity = Unit | Building;
@@ -39,23 +66,47 @@ export const createUnit = (
 ): Unit => ({
   id: `unit_${nextId++}`,
   kind: 'unit',
-  x, y, color,
+  x,
+  y,
+  color,
   speed: 2.5,
   radius: 14,
   movementType,
-  hp: 100, maxHp: 100,
+  attackDamage: 25,
+  attackRange: 1.2,
+  hp: 100,
+  maxHp: 100,
   isSelected: false,
   path: [],
+  commandsQueue: [],
+  activeCommand: null,
 });
 
-export const createBuilding = (x: number, y: number, color = '#475569'): Building => ({
-  id: `building_${nextId++}`,
-  kind: 'building',
-  x, y, color,
-  sizeTiles: 1,
-  height3d: 28,
-  hp: 500, maxHp: 500,
-  isSelected: false,
-  speed: 4,
-  path: [],
-});
+export const createBuilding = (
+  x: number,
+  y: number,
+  characteristics: Partial<BuildingType> | string = {},
+): Building => {
+  const options: Partial<BuildingType> = typeof characteristics === 'string'
+    ? { color: characteristics }
+    : characteristics;
+
+  return {
+    id: `building_${nextId++}`,
+    kind: 'building',
+    typeId: options.id ?? 'house',
+    name: options.name ?? 'Дом',
+    x,
+    y,
+    color: options.color ?? '#475569',
+    sizeTiles: options.sizeTiles ?? 1,
+    height3d: options.height3d ?? 28,
+    hp: options.maxHp ?? 500,
+    maxHp: options.maxHp ?? 500,
+    isSelected: false,
+    speed: 4,
+    path: [],
+    commandsQueue: [],
+    activeCommand: null,
+  };
+};

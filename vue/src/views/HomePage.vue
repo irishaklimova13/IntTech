@@ -15,13 +15,28 @@
         <button class="btn-purple" title="Фиолетовый юнит" @click="spawnUnit('#9333ea')"></button>
         <button class="btn-orange" title="Оранжевый юнит (суша)" @click="spawnUnit('#f97316')"></button>
         <button class="btn-water" title="Создать водного юнита" @click="spawnUnit('#38bdf8', 'water')">⛵</button>
+        <div class="build-menu">
+          <button class="btn-build" :class="{ active: isBuildMenuOpen }" @click="toggleBuildMenu">Строительство</button>
+          <div v-if="isBuildMenuOpen" class="build-options">
+            <button
+              v-for="type in BUILDING_TYPES"
+              :key="type.id"
+              :class="{ selected: selectedBuildingType?.id === type.id }"
+              @click="selectBuildingType(type)"
+            >
+              <span>{{ type.name }}</span>
+              <small>{{ type.sizeTiles }}×{{ type.sizeTiles }}</small>
+            </button>
+          </div>
+        </div>
         <button class="btn-reset" @click="resetCamera">Центр</button>
       </div>
 
       <div class="hints">
-        <span>ЛКМ — Выбрать</span> ·
+        <span>{{ selectedBuildingType ? 'ЛКМ — Построить · ПКМ/Esc — Отмена' : 'ЛКМ — Выбрать' }}</span> ·
         <span>Зажать ЛКМ — Рамка</span> ·
         <span>ПКМ — Идти</span> ·
+        <span>Shift + ПКМ — Очередь</span> ·
         <span>Суша / вода — разные юниты</span> ·
         <span>WASD — Камера</span>
       </div>
@@ -49,6 +64,9 @@
             <path :d="p.d" fill="none" stroke="#22c55e" stroke-width="2" stroke-dasharray="5,5" opacity="0.6" />
             <circle :cx="p.target.x" :cy="p.target.y" r="5" fill="#22c55e" opacity="0.8" />
           </g>
+          <g v-for="q in queuedTargets" :key="q.id">
+            <circle :cx="q.x" :cy="q.y" r="6" fill="#f59e0b" stroke="#fff" stroke-width="1" opacity="0.95" />
+          </g>
         </svg>
 
         <div class="origin" :style="{ left: (viewportW / 2 - cameraX) + 'px', top: (viewportH / 2 - cameraY) + 'px' }">
@@ -56,6 +74,13 @@
         </div>
 
         <div v-for="m in markerViews" :key="'m' + m.id" class="marker" :style="{ left: m.left + 'px', top: m.top + 'px' }"></div>
+
+        <div
+          v-if="buildingPreview"
+          class="building-preview"
+          :class="buildingPreview.valid ? 'valid' : 'invalid'"
+          :style="buildingPreview.style"
+        ></div>
 
         <!-- Сущности -->
         <div v-for="v in entityViews" :key="v.id" class="entity" :style="{ left: v.left + 'px', top: v.top + 'px' }">
@@ -66,9 +91,11 @@
             :is-selected="v.ent.isSelected" 
           />
           
-          <HouseSprite 
-            v-else-if="v.ent.kind === 'building'" 
-            :is-selected="v.ent.isSelected" 
+          <HouseSprite
+            v-else-if="v.ent.kind === 'building'"
+            :is-selected="v.ent.isSelected"
+            :size-tiles="v.ent.sizeTiles"
+            :color="v.ent.color"
           />
         </div>
       </div>
@@ -83,6 +110,8 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRtsGame } from '../game/useRtsGame';
 import { worldToIso, TILE_H, TILE_W } from '../game/iso';
 import type { Unit } from '../game/entities';
+import { BUILDING_TYPES } from '../game/buildings';
+import type { BuildingType } from '../game/entities';
 import UnitSprite from '../components/UnitSprite.vue';
 import HouseSprite from '../components/HouseSprite.vue';
 
@@ -96,11 +125,31 @@ const {
   cameraWorld, zoomDisplay, entityCount,
   zoomAt,
   resetCamera, spawnUnit,
+  screenToWorld, canPlaceBuilding, placeBuilding,
   selectAt, selectInBox,
   commandMoveTo,
   beginPan, movePan, endPan,
   init, destroy,
 } = game;
+
+const isBuildMenuOpen = ref(false);
+const selectedBuildingType = ref<BuildingType | null>(null);
+const previewTile = ref<{ x: number; y: number } | null>(null);
+
+const cancelBuilding = () => {
+  selectedBuildingType.value = null;
+  previewTile.value = null;
+};
+
+const toggleBuildMenu = () => {
+  isBuildMenuOpen.value = !isBuildMenuOpen.value;
+  if (!isBuildMenuOpen.value) cancelBuilding();
+};
+
+const selectBuildingType = (type: BuildingType) => {
+  selectedBuildingType.value = type;
+  previewTile.value = null;
+};
 
 // ===== Сетка (SVG-паттерн) =====
 const gridSvg = 
@@ -130,8 +179,9 @@ const terrainTileStyle = (x: number, y: number) => {
 
 // ===== Представления сущностей =====
 const entityViews = computed(() => {
-  const list = entities.map((ent) => {
-    const iso = worldToIso(ent.x, ent.y);
+  const list = entities.value.map((ent) => {
+    const offset = ent.kind === 'building' ? (ent.sizeTiles - 1) / 2 : 0;
+    const iso = worldToIso(ent.x + offset, ent.y + offset);
     return {
       id: ent.id,
       ent,
@@ -143,6 +193,24 @@ const entityViews = computed(() => {
   return list;
 });
 
+const buildingPreview = computed(() => {
+  const type = selectedBuildingType.value;
+  const tile = previewTile.value;
+  if (!type || !tile) return null;
+  const centerOffset = (type.sizeTiles - 1) / 2;
+  const iso = worldToIso(tile.x + centerOffset, tile.y + centerOffset);
+  return {
+    valid: canPlaceBuilding(type, tile.x, tile.y),
+    style: {
+      left: `${iso.x - cameraX.value + viewportW.value / 2}px`,
+      top: `${iso.y - cameraY.value + viewportH.value / 2}px`,
+      width: `${TILE_W * type.sizeTiles}px`,
+      height: `${TILE_H * type.sizeTiles}px`,
+    },
+  };
+});
+
+// ===== Маркеры =====
 const markerViews = computed(() =>
   markers.value.map((m) => {
     const iso = worldToIso(m.x, m.y);
@@ -156,7 +224,7 @@ const markerViews = computed(() =>
 
 // ===== Линии пути =====
 const unitPaths = computed(() => {
-  return entities
+  return entities.value
     .filter((e): e is Unit => e.kind === 'unit' && e.isSelected && e.path.length > 0)
     .map((u) => {
       const points = [{ x: u.x, y: u.y }, ...u.path];
@@ -172,6 +240,24 @@ const unitPaths = computed(() => {
       return { id: u.id, d, target };
     });
 });
+
+// ===== Отображение точек команд в очереди =====
+const queuedTargets = computed(() =>
+  entities.value
+    .filter((entity): entity is Unit => entity.kind === 'unit' && entity.isSelected)
+    .flatMap((unit) =>
+      unit.commandsQueue
+        .filter((command) => command.type === 'MOVE')
+        .map((command, index) => {
+          const iso = worldToIso(command.x, command.y);
+          return {
+            id: `${unit.id}-queued-${index}`,
+            x: iso.x - cameraX.value + viewportW.value / 2,
+            y: iso.y - cameraY.value + viewportH.value / 2,
+          };
+        }),
+    ),
+);
 
 // ===== Resize =====
 let ro: ResizeObserver | null = null;
@@ -215,6 +301,7 @@ const onMouseDown = (e: MouseEvent) => {
   downY = y;
 
   if (e.button === 0) {
+    if (selectedBuildingType.value) return;
     isSelecting.value = true;
     selStartX.value = x;
     selStartY.value = y;
@@ -228,6 +315,10 @@ const onMouseDown = (e: MouseEvent) => {
 
 const onMouseMove = (e: MouseEvent) => {
   const { x, y } = localCoords(e);
+  if (selectedBuildingType.value) {
+    const world = screenToWorld(x, y);
+    previewTile.value = { x: Math.round(world.x), y: Math.round(world.y) };
+  }
   if (isSelecting.value) {
     selEndX.value = x;
     selEndY.value = y;
@@ -242,13 +333,20 @@ const onMouseUp = (e: MouseEvent) => {
   if (e.button === 1) {
     endPan();
   } else if (e.button === 0) {
+    if (selectedBuildingType.value) {
+      const world = screenToWorld(x, y);
+      placeBuilding(selectedBuildingType.value, Math.round(world.x), Math.round(world.y));
+      pressedButton = -1;
+      return;
+    }
     if (isSelecting.value) {
       isSelecting.value = false;
       if (moved) selectInBox(downX, downY, x, y, e.shiftKey);
       else selectAt(x, y, e.shiftKey);
     }
   } else if (e.button === 2) {
-    commandMoveTo(x, y);
+    if (selectedBuildingType.value) cancelBuilding();
+    else commandMoveTo(x, y, e.shiftKey);
   }
   pressedButton = -1;
 };
@@ -256,6 +354,7 @@ const onMouseUp = (e: MouseEvent) => {
 const onMouseLeave = (e: MouseEvent) => {
   if (pressedButton === 1) onMouseUp(e);
   if (isSelecting.value) isSelecting.value = false;
+  previewTile.value = null;
 };
 
 const onWheel = (e: WheelEvent) => {
@@ -266,6 +365,10 @@ const onWheel = (e: WheelEvent) => {
 
 const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
+const onBuildKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') cancelBuilding();
+};
+
 // ===== Lifecycle =====
 onMounted(() => {
   const el = viewportRef.value;
@@ -274,11 +377,13 @@ onMounted(() => {
   ro = new ResizeObserver(updateSize);
   ro.observe(el);
   init();
+  window.addEventListener('keydown', onBuildKeyDown);
 });
 
 onUnmounted(() => {
   if (ro) ro.disconnect();
   destroy();
+  window.removeEventListener('keydown', onBuildKeyDown);
 });
 </script>
 
@@ -316,6 +421,25 @@ onUnmounted(() => {
 }
 .btn-reset:hover { background: #334155; transform: none !important; }
 
+.build-menu { position: relative; }
+.actions .btn-build {
+  width: auto; height: 30px; border-radius: 4px; padding: 0 10px; color: #f8fafc;
+  background: #0f766e; font-family: inherit; font-weight: bold;
+}
+.actions .btn-build.active { border-color: #5eead4; }
+.build-options {
+  position: absolute; top: 38px; left: 50%; transform: translateX(-50%); min-width: 190px;
+  padding: 8px; border: 1px solid #475569; border-radius: 6px; background: #1e293b;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .45); z-index: 30;
+}
+.actions .build-options button {
+  display: flex; justify-content: space-between; align-items: center; width: 100%; height: 34px;
+  margin: 2px 0; padding: 0 9px; border-radius: 4px; color: #e2e8f0; background: #334155;
+  font-family: inherit;
+}
+.actions .build-options button.selected { border-color: #4ade80; background: #166534; }
+.build-options small { color: #cbd5e1; }
+
 .viewport { flex: 1; position: relative; overflow: hidden; background: #111827; cursor: crosshair; touch-action: none; }
 .grid { position: absolute; inset: 0; pointer-events: none; }
 .world { position: absolute; inset: 0; transform-origin: center center; will-change: transform; pointer-events: none; }
@@ -338,6 +462,14 @@ onUnmounted(() => {
 }
 
 .entity { position: absolute; width: 0; height: 0; z-index: 2; }
+
+.building-preview {
+  position: absolute; transform: translate(-50%, -50%);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  box-sizing: border-box; z-index: 3; opacity: .72;
+}
+.building-preview.valid { background: rgba(34, 197, 94, .55); outline: 2px solid #86efac; }
+.building-preview.invalid { background: rgba(239, 68, 68, .6); outline: 2px solid #fca5a5; }
 
 .selection-box {
   position: absolute; border: 1px solid #3b82f6; background-color: rgba(59, 130, 246, 0.25);
