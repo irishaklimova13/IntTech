@@ -5,7 +5,7 @@ import { createBuilding, createUnit, type Entity, type Unit, type Building } fro
 import { findPath } from './pathfinding';
 import { findNearestTerrainTile, getTerrainAt, isInsideMap, MAP_RADIUS } from './terrain';
 import type { GameState, GameEventPayload } from '../store/game';
-import { buildingOccupiesTile } from './buildings';
+import { buildingOccupiesTile, distanceFromBuildingFootprint } from './buildings';
 import type { BuildingType } from './entities';
 
 export const useRtsGame = () => {
@@ -153,7 +153,11 @@ export const useRtsGame = () => {
             isTileOccupied(tileX, tileY)) return false;
       }
     }
-    return true;
+    const candidate = { x: anchorX, y: anchorY, sizeTiles: type.sizeTiles };
+    return !entities.value.some((entity) =>
+      entity.kind === 'unit' &&
+      distanceFromBuildingFootprint(entity.x, entity.y, candidate) < 0.8
+    );
   };
 
   const placeBuilding = (type: BuildingType, x: number, y: number): Building | null => {
