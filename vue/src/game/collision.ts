@@ -1,5 +1,6 @@
 import type { Building, Entity, Unit } from './entities';
 import { getTerrainAt } from './terrain';
+import { buildingFootprintsOverlap, distanceFromBuildingFootprint } from './buildings';
 
 const UNIT_SEPARATION = 0.8;
 const UNIT_BUILDING_SEPARATION = 0.8;
@@ -18,7 +19,7 @@ const canPlaceUnit = (unit: Unit, x: number, y: number, entities: Entity[]) => {
   for (const entity of entities) {
     if (entity.id === unit.id) continue;
     const distance = Math.hypot(x - entity.x, y - entity.y);
-    if (entity.kind === 'building' && distance < UNIT_BUILDING_SEPARATION - EPSILON) return false;
+    if (entity.kind === 'building' && distanceFromBuildingFootprint(x, y, entity) < UNIT_BUILDING_SEPARATION - EPSILON) return false;
     if (entity.kind === 'unit' && distance < UNIT_SEPARATION - EPSILON) return false;
   }
   return true;
@@ -27,9 +28,11 @@ const canPlaceUnit = (unit: Unit, x: number, y: number, entities: Entity[]) => {
 const canPlaceBuilding = (building: Building, x: number, y: number, entities: Entity[]) => {
   for (const entity of entities) {
     if (entity.id === building.id) continue;
-    const distance = Math.hypot(x - entity.x, y - entity.y);
-    const required = entity.kind === 'building' ? BUILDING_SEPARATION : UNIT_BUILDING_SEPARATION;
-    if (distance < required - EPSILON) return false;
+    if (entity.kind === 'building') {
+      if (buildingFootprintsOverlap(building, entity, BUILDING_SEPARATION)) return false;
+      continue;
+    }
+    if (distanceFromBuildingFootprint(entity.x, entity.y, building) < UNIT_BUILDING_SEPARATION - EPSILON) return false;
   }
   return true;
 };
