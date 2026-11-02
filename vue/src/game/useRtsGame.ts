@@ -2,7 +2,8 @@ import { computed, ref } from 'vue';
 import { useStore } from 'vuex';
 import { isoToWorld, worldToIso, type Vec2 } from './iso';
 import { createBuilding, createUnit, type Entity, type Unit, type Building } from './entities';
-import { findNearestTerrainTile } from './terrain';
+import { findPath } from './pathfinding';
+import { findNearestTerrainTile, getTerrainAt, isInsideMap, MAP_RADIUS } from './terrain';
 import type { GameState, GameEventPayload } from '../store/game';
 
 export const useRtsGame = () => {
@@ -132,6 +133,100 @@ export const useRtsGame = () => {
     }
   };
 
+  const GROUP_UNIT_SPACING = 0.8;
+
+  const isTileBlockedForUnit = (unit: Unit, x: number, y: number): boolean =>
+    !isInsideMap(x, y) ||
+    getTerrainAt(x, y) !== unit.movementType ||
+    entities.value.some((entity) =>
+      entity.kind === 'building' &&
+      Math.round(entity.x) === x &&
+      Math.round(entity.y) === y
+    );
+
+  const createGroupDestinationCandidates = (target: Vec2): Vec2[] => {
+    const searchCenter = {
+      x: Math.max(-MAP_RADIUS, Math.min(MAP_RADIUS, target.x)),
+      y: Math.max(-MAP_RADIUS, Math.min(MAP_RADIUS, target.y)),
+    };
+    const candidates: Vec2[] = [];
+    const seenTiles = new Set<string>();
+
+    const addCandidate = (point: Vec2) => {
+      const tileX = Math.round(point.x);
+      const tileY = Math.round(point.y);
+      const key = `${tileX},${tileY}`;
+      if (!isInsideMap(tileX, tileY) || seenTiles.has(key)) return;
+      seenTiles.add(key);
+      candidates.push(point);
+    };
+
+    if (isInsideMap(Math.round(target.x), Math.round(target.y))) {
+      addCandidate({ x: target.x, y: target.y });
+    } else {
+      addCandidate({ x: Math.round(searchCenter.x), y: Math.round(searchCenter.y) });
+    }
+
+    // Spiral candidates cover the map while keeping nearby destinations first.
+    for (let step = 1; step <= 600; step++) {
+      const angle = step * 2.39996;
+      const radius = 0.8 * Math.sqrt(step);
+      addCandidate({
+        x: Math.round(searchCenter.x + Math.cos(angle) * radius),
+        y: Math.round(searchCenter.y + Math.sin(angle) * radius),
+      });
+    }
+
+    candidates.sort((a, b) => {
+      const distanceA = (a.x - target.x) ** 2 + (a.y - target.y) ** 2;
+      const distanceB = (b.x - target.x) ** 2 + (b.y - target.y) ** 2;
+      return distanceA - distanceB || a.x - b.x || a.y - b.y;
+    });
+    return candidates;
+  };
+
+  const findGroupDestinations = (target: Vec2, units: Unit[]): (Vec2 | null)[] => {
+    const selectedUnitIds = new Set(units.map((unit) => unit.id));
+    const reservedDestinations: Vec2[] = [];
+    const candidates = createGroupDestinationCandidates(target);
+
+    return units.map((unit) => {
+      for (const candidate of candidates) {
+        const tileX = Math.round(candidate.x);
+        const tileY = Math.round(candidate.y);
+        if (isTileBlockedForUnit(unit, tileX, tileY)) continue;
+
+        const overlapsAnotherUnit = entities.value.some((entity) =>
+          entity.kind === 'unit' &&
+          !selectedUnitIds.has(entity.id) &&
+          Math.hypot(entity.x - candidate.x, entity.y - candidate.y) < GROUP_UNIT_SPACING
+        );
+        if (overlapsAnotherUnit) continue;
+
+        const overlapsReservedDestination = reservedDestinations.some(
+          (destination) =>
+            Math.hypot(destination.x - candidate.x, destination.y - candidate.y) < GROUP_UNIT_SPACING
+        );
+        if (overlapsReservedDestination) continue;
+
+        // A free tile is not enough: each unit must be able to reach its own destination.
+        const path = findPath(
+          unit.x,
+          unit.y,
+          candidate.x,
+          candidate.y,
+          (x, y) => isTileBlockedForUnit(unit, x, y),
+        );
+        if (path.length === 0) continue;
+
+        reservedDestinations.push(candidate);
+        return candidate;
+      }
+
+      return null;
+    });
+  };
+
   const commandMoveTo = (sx: number, sy: number, queued = false) => {
     const target = screenToWorld(sx, sy);
     const selectedUnits = entities.value.filter(
@@ -141,16 +236,16 @@ export const useRtsGame = () => {
       (entity): entity is Building => entity.kind === 'building' && entity.isSelected,
     );
 
+    const unitDestinations = findGroupDestinations(target, selectedUnits);
     selectedUnits.forEach((unit, index) => {
-      let x = target.x;
-      let y = target.y;
-      if (selectedUnits.length > 1) {
-        const angle = index * 2.39996;
-        const radius = 0.6 * Math.sqrt(index);
-        x += Math.cos(angle) * radius;
-        y += Math.sin(angle) * radius;
-      }
-      enqueue({ type: 'MOVE_REQUESTED', entityId: unit.id, target: { x, y }, queued });
+      const destination = unitDestinations[index];
+      if (!destination) return;
+      enqueue({
+        type: 'MOVE_REQUESTED',
+        entityId: unit.id,
+        target: destination,
+        queued,
+      });
     });
 
     selectedBuildings.forEach((building, index) => {
