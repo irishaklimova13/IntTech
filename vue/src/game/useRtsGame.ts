@@ -5,6 +5,7 @@ import { createBuilding, createUnit, type Entity, type Unit, type Building } fro
 import { findPath } from './pathfinding';
 import { findNearestTerrainTile, getTerrainAt, isInsideMap, MAP_RADIUS } from './terrain';
 import type { GameState, GameEventPayload } from '../store/game';
+import { buildingOccupiesTile } from './buildings';
 
 export const useRtsGame = () => {
   const store = useStore();
@@ -139,9 +140,7 @@ export const useRtsGame = () => {
     !isInsideMap(x, y) ||
     getTerrainAt(x, y) !== unit.movementType ||
     entities.value.some((entity) =>
-      entity.kind === 'building' &&
-      Math.round(entity.x) === x &&
-      Math.round(entity.y) === y
+      entity.kind === 'building' && buildingOccupiesTile(entity, x, y)
     );
 
   const createGroupDestinationCandidates = (target: Vec2): Vec2[] => {
