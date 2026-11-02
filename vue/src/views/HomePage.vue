@@ -13,7 +13,8 @@
         <button class="btn-red" title="Красный юнит" @click="spawnUnit('#dc2626')"></button>
         <button class="btn-green" title="Зеленый юнит" @click="spawnUnit('#16a34a')"></button>
         <button class="btn-purple" title="Фиолетовый юнит" @click="spawnUnit('#9333ea')"></button>
-        <button class="btn-orange" title="Оранжевый юнит" @click="spawnUnit('#f97316')"></button>
+        <button class="btn-orange" title="Оранжевый юнит (суша)" @click="spawnUnit('#f97316')"></button>
+        <button class="btn-water" title="Создать водного юнита" @click="spawnUnit('#38bdf8', 'water')">⛵</button>
         <button class="btn-reset" @click="resetCamera">Центр</button>
       </div>
 
@@ -21,6 +22,7 @@
         <span>ЛКМ — Выбрать</span> ·
         <span>Зажать ЛКМ — Рамка</span> ·
         <span>ПКМ — Идти</span> ·
+        <span>Суша / вода — разные юниты</span> ·
         <span>WASD — Камера</span>
       </div>
     </header>
@@ -38,6 +40,9 @@
       <div class="grid" :style="gridStyle"></div>
 
       <div class="world" :style="worldStyle">
+        <!-- Карта: отдельные клетки суши и воды -->
+        <div v-for="tile in mapTiles" :key="'tile-' + tile.x + '-' + tile.y" class="terrain-tile" :class="'terrain-' + tile.terrain" :style="terrainTileStyle(tile.x, tile.y)"></div>
+
         <!-- Пути -->
         <svg class="paths-layer" width="100%" height="100%">
           <g v-for="p in unitPaths" :key="'path-' + p.id">
@@ -87,7 +92,7 @@ const game = useRtsGame();
 const {
   cameraX, cameraY, zoom,
   viewportW, viewportH,
-  entities, markers,
+  entities, markers, mapTiles,
   cameraWorld, zoomDisplay, entityCount,
   zoomAt,
   resetCamera, spawnUnit,
@@ -117,6 +122,11 @@ const gridStyle = computed(() => {
 });
 
 const worldStyle = computed(() => ({ transform: `scale(${zoom.value})` }));
+
+const terrainTileStyle = (x: number, y: number) => {
+  const iso = worldToIso(x, y);
+  return { left: `${iso.x - cameraX.value + viewportW.value / 2}px`, top: `${iso.y - cameraY.value + viewportH.value / 2}px` };
+};
 
 // ===== Представления сущностей =====
 const entityViews = computed(() => {
@@ -298,6 +308,7 @@ onUnmounted(() => {
 .btn-blue { background: #3b82f6; } .btn-red { background: #dc2626; }
 .btn-green { background: #16a34a; } .btn-purple { background: #9333ea; }
 .btn-orange { background: #f97316; }
+.btn-water { width: 30px !important; height: 30px !important; border-radius: 6px !important; background: #0369a1; color: #e0f2fe; font-size: 17px; }
 
 .btn-reset {
   width: auto !important; height: 30px !important; border-radius: 4px !important;
@@ -309,6 +320,9 @@ onUnmounted(() => {
 .grid { position: absolute; inset: 0; pointer-events: none; }
 .world { position: absolute; inset: 0; transform-origin: center center; will-change: transform; pointer-events: none; }
 
+.terrain-tile { position: absolute; width: 64px; height: 32px; transform: translate(-50%, -50%); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); border: 1px solid rgba(15, 23, 42, 0.45); box-sizing: border-box; }
+.terrain-land { background: linear-gradient(135deg, #365b42, #294936); }
+.terrain-water { background: linear-gradient(135deg, #0e7490, #164e63); }
 .paths-layer { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 1; }
 
 .origin { position: absolute; width: 10px; height: 10px; background: #f59e0b; border-radius: 50%; transform: translate(-50%, -50%); }
