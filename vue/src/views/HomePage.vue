@@ -130,7 +130,7 @@ const terrainTileStyle = (x: number, y: number) => {
 
 // ===== Представления сущностей =====
 const entityViews = computed(() => {
-  const list = entities.map((ent) => {
+  const list = entities.value.map((ent) => {
     const iso = worldToIso(ent.x, ent.y);
     return {
       id: ent.id,
@@ -156,7 +156,7 @@ const markerViews = computed(() =>
 
 // ===== Линии пути =====
 const unitPaths = computed(() => {
-  return entities
+  return entities.value
     .filter((e): e is Unit => e.kind === 'unit' && e.isSelected && e.path.length > 0)
     .map((u) => {
       const points = [{ x: u.x, y: u.y }, ...u.path];
