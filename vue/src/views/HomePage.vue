@@ -22,6 +22,7 @@
         <span>ЛКМ — Выбрать</span> ·
         <span>Зажать ЛКМ — Рамка</span> ·
         <span>ПКМ — Идти</span> ·
+        <span>Shift + ПКМ — Очередь</span> ·
         <span>Суша / вода — разные юниты</span> ·
         <span>WASD — Камера</span>
       </div>
@@ -48,6 +49,9 @@
           <g v-for="p in unitPaths" :key="'path-' + p.id">
             <path :d="p.d" fill="none" stroke="#22c55e" stroke-width="2" stroke-dasharray="5,5" opacity="0.6" />
             <circle :cx="p.target.x" :cy="p.target.y" r="5" fill="#22c55e" opacity="0.8" />
+          </g>
+          <g v-for="q in queuedTargets" :key="q.id">
+            <circle :cx="q.x" :cy="q.y" r="6" fill="#f59e0b" stroke="#fff" stroke-width="1" opacity="0.95" />
           </g>
         </svg>
 
@@ -173,6 +177,24 @@ const unitPaths = computed(() => {
     });
 });
 
+// ===== Отображение точек команд в очереди =====
+const queuedTargets = computed(() =>
+  entities.value
+    .filter((entity): entity is Unit => entity.kind === 'unit' && entity.isSelected)
+    .flatMap((unit) =>
+      unit.commandsQueue
+        .filter((command) => command.type === 'MOVE')
+        .map((command, index) => {
+          const iso = worldToIso(command.x, command.y);
+          return {
+            id: `${unit.id}-queued-${index}`,
+            x: iso.x - cameraX.value + viewportW.value / 2,
+            y: iso.y - cameraY.value + viewportH.value / 2,
+          };
+        }),
+    ),
+);
+
 // ===== Resize =====
 let ro: ResizeObserver | null = null;
 const updateSize = () => {
@@ -248,7 +270,7 @@ const onMouseUp = (e: MouseEvent) => {
       else selectAt(x, y, e.shiftKey);
     }
   } else if (e.button === 2) {
-    commandMoveTo(x, y);
+    commandMoveTo(x, y, e.shiftKey);
   }
   pressedButton = -1;
 };
