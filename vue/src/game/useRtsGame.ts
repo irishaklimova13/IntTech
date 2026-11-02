@@ -87,15 +87,16 @@ export const useRtsGame = () => {
   };
 
   const hitTest = (entity: Entity, sx: number, sy: number): boolean => {
-    const position = worldToScreen(entity.x, entity.y);
+    const footprintOffset = entity.kind === 'building' ? (entity.sizeTiles - 1) / 2 : 0;
+    const position = worldToScreen(entity.x + footprintOffset, entity.y + footprintOffset);
     if (entity.kind === 'unit') {
       const bodyCenterY = position.y - 17 * zoom.value;
       return Math.hypot(sx - position.x, sy - bodyCenterY) <= entity.radius * zoom.value;
     }
-    const halfWidth = 34 * zoom.value;
-    return Math.abs(sx - position.x) <= halfWidth &&
-      sy >= position.y - 60 * zoom.value &&
-      sy <= position.y + 16 * zoom.value;
+    const halfWidth = 34 * entity.sizeTiles * zoom.value;
+    const top = position.y - (60 + (entity.sizeTiles - 1) * 20) * zoom.value;
+    const bottom = position.y + 16 * entity.sizeTiles * zoom.value;
+    return Math.abs(sx - position.x) <= halfWidth && sy >= top && sy <= bottom;
   };
 
   const getEntityAt = (sx: number, sy: number): Entity | null => {
