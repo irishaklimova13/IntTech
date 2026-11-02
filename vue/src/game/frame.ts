@@ -88,15 +88,18 @@ const applyEvents = (entities: Entity[], events: GameEvent[]) => {
         if (!entity) break;
         if (entity.kind === 'unit') {
           const command: ICommand = { type: 'MOVE', x: event.target.x, y: event.target.y };
-          if (event.queued && (entity.activeCommand || entity.path.length > 0)) {
-            entity.commandsQueue.push(command);
-          } else {
-            if (!event.queued) entity.commandsQueue = [];
+          if (event.queued) {
             if (entity.activeCommand || entity.path.length > 0) {
               entity.commandsQueue.push(command);
             } else {
               startMoveCommand(entity, command, entities);
             }
+          } else {
+            // A regular move order replaces the current order immediately.
+            entity.commandsQueue = [];
+            entity.activeCommand = null;
+            entity.path = [];
+            startMoveCommand(entity, command, entities);
           }
         } else {
           const x = Math.round(event.target.x);
