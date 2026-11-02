@@ -129,16 +129,14 @@ export const useRtsGame = () => {
     }
   };
 
-  // ===== Проверка препятствий для A* =====
-  const isBlocked = (tx: number, ty: number): boolean => {
-    for (const ent of entities) {
-      if (ent.kind === 'building') {
-        if (Math.round(ent.x) === tx && Math.round(ent.y) === ty) {
-          return true;
-        }
-      }
-    }
-    return false;
+  // ===== Terrain + obstacles for A* =====
+  const isBlocked = (tx: number, ty: number, movementType: Unit['movementType']): boolean => {
+    if (!isInsideMap(tx, ty) || getTerrainAt(tx, ty) !== movementType) return true;
+    return entities.some((ent) =>
+      ent.kind === 'building' &&
+      Math.round(ent.x) === tx &&
+      Math.round(ent.y) === ty
+    );
   };
 
   // ===== Приказы (ПКМ) =====
@@ -285,10 +283,11 @@ export const useRtsGame = () => {
   };
 
   const init = () => {
-    entities.push(createUnit(-2, 0, '#3b82f6'));
-    entities.push(createUnit(2, 0, '#dc2626'));
-    entities.push(createUnit(0, 2, '#16a34a'));
-    entities.push(createUnit(-2, 2, '#9333ea'));
+    entities.push(createUnit(-2, 0, '#3b82f6', 'land'));
+    entities.push(createUnit(2, 0, '#dc2626', 'land'));
+    entities.push(createUnit(0, 2, '#16a34a', 'land'));
+    entities.push(createUnit(-2, 2, '#9333ea', 'land'));
+    entities.push(createUnit(5, 4, '#38bdf8', 'water'));
     
     entities.push(createBuilding(0, -2));
     entities.push(createBuilding(3, -4));
@@ -312,11 +311,13 @@ export const useRtsGame = () => {
   };
 
   // ===== Публичные действия =====
-  const spawnUnit = (color = '#f97316') => {
+  const spawnUnit = (color = '#f97316', movementType: Unit['movementType'] = 'land') => {
     const center = isoToWorld(cameraX.value, cameraY.value);
-    const a = Math.random() * Math.PI * 2;
-    const r = 2 + Math.random() * 1.5;
-    entities.push(createUnit(center.x + Math.cos(a) * r, center.y + Math.sin(a) * r, color));
+    const spawn = findNearestTerrainTile(center.x, center.y, movementType, (x, y) =>
+      entities.some((e) => e.kind === 'building' && Math.round(e.x) === x && Math.round(e.y) === y),
+    );
+    if (!spawn) return;
+    entities.push(createUnit(spawn.x, spawn.y, color, movementType));
   };
 
   const cameraWorld = computed(() => {
