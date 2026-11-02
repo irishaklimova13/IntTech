@@ -110,7 +110,8 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRtsGame } from '../game/useRtsGame';
 import { worldToIso, TILE_H, TILE_W } from '../game/iso';
 import type { Unit } from '../game/entities';
-import { BUILDING_TYPES, type BuildingType } from '../game/buildings';
+import { BUILDING_TYPES } from '../game/buildings';
+import type { BuildingType } from '../game/entities';
 import UnitSprite from '../components/UnitSprite.vue';
 import HouseSprite from '../components/HouseSprite.vue';
 
