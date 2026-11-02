@@ -217,10 +217,25 @@ export const useRtsGame = () => {
           const pushX = (dx / dist) * push;
           const pushY = (dy / dist) * push;
 
-          u1.x -= pushX * (weight1 / totalWeight);
-          u1.y -= pushY * (weight1 / totalWeight);
-          u2.x += pushX * (weight2 / totalWeight);
-          u2.y += pushY * (weight2 / totalWeight);
+          const nextU1 = {
+            x: u1.x - pushX * (weight1 / totalWeight),
+            y: u1.y - pushY * (weight1 / totalWeight),
+          };
+          const nextU2 = {
+            x: u2.x + pushX * (weight2 / totalWeight),
+            y: u2.y + pushY * (weight2 / totalWeight),
+          };
+
+          // Soft collision must not push a unit onto another terrain type
+          // or into a building.
+          if (!isBlocked(Math.round(nextU1.x), Math.round(nextU1.y), u1.movementType)) {
+            u1.x = nextU1.x;
+            u1.y = nextU1.y;
+          }
+          if (!isBlocked(Math.round(nextU2.x), Math.round(nextU2.y), u2.movementType)) {
+            u2.x = nextU2.x;
+            u2.y = nextU2.y;
+          }
         }
       }
     }
