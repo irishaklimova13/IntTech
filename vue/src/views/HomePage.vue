@@ -116,6 +116,29 @@
         </div>
       </div>
 
+      <aside
+        v-if="selectedEntities.length"
+        class="object-panel"
+        aria-label="Выбранные объекты"
+        @mousedown.stop
+        @mousemove.stop
+        @mouseup.stop
+        @wheel.stop
+        @contextmenu.stop.prevent
+      >
+        <section v-for="entity in selectedEntities" :key="entity.id">
+          <strong>{{ entity.kind === 'unit' ? 'Персонаж' : entity.name }}</strong>
+          <small>{{ entity.id }}</small>
+          <div>Здоровье: {{ entity.health }} / {{ entity.maxHealth }}</div>
+          <template v-if="entity.kind === 'unit'">
+            <div>Сила: {{ entity.strength }}</div>
+            <div>Скорость передвижения: {{ entity.movementSpeed }}</div>
+            <div>Скорость атаки: {{ entity.attackSpeed }}</div>
+            <button type="button" @click="selfDestruct(entity.id)">Самоуничтожение</button>
+          </template>
+          <div v-else>Размер: {{ entity.sizeTiles }}×{{ entity.sizeTiles }}</div>
+        </section>
+      </aside>
       <div class="selection-box" :style="selectionBoxStyle"></div>
     </div>
   </div>
@@ -140,6 +163,7 @@ const {
   viewportW, viewportH,
   entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, selectedProducerCount, PRODUCER_LIMIT,
   attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
+  selectedEntities, selfDestruct,
   cameraWorld, zoomDisplay, entityCount,
   zoomAt,
   resetCamera, spawnUnit,
@@ -504,6 +528,11 @@ onUnmounted(() => {
 }
 .building-preview.valid { background: rgba(34, 197, 94, .55); outline: 2px solid #86efac; }
 .building-preview.invalid { background: rgba(239, 68, 68, .6); outline: 2px solid #fca5a5; }
+
+.object-panel { position: absolute; right: 16px; bottom: 16px; z-index: 20; max-height: 50%; overflow: auto; padding: 14px; border: 1px solid #475569; border-radius: 6px; background: #1e293b; font-size: 13px; line-height: 1.7; }
+.object-panel section + section { margin-top: 12px; border-top: 1px solid #475569; padding-top: 12px; }
+.object-panel small { display: block; color: #94a3b8; }
+.object-panel button { margin-top: 8px; padding: 6px 10px; background: #991b1b; color: white; border: 1px solid #f87171; border-radius: 4px; cursor: pointer; }
 
 .selection-box {
   position: absolute; border: 1px solid #3b82f6; background-color: rgba(59, 130, 246, 0.25);
