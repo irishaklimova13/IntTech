@@ -40,6 +40,7 @@ export function spawnFromBuilding(entities: Entity[], building: Building, weapon
     movementSpeed: spec.speed, attackSpeed: spec.attackSpeed,
   } : {});
   unit.groupId = building.groupId;
+  unit.factionId = building.factionId;
   unit.producerId = building.id;
   entities.push(unit);
   return unit;
