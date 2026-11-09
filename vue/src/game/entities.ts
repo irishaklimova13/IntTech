@@ -37,6 +37,7 @@ export interface BaseEntity {
   maxHp: number;
   color: string;
   groupId?: string | number;
+  factionId?: number;
   commandsQueue: ICommand[];
   activeCommand: ICommand | null;
 }

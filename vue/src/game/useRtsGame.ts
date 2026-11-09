@@ -19,6 +19,19 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
   const gameState = computed(() => (store.state as { game: GameState }).game);
   const entities = computed(() => gameState.value.entities);
 
+  type Faction = { id: number; name: string; color: string; isEnemy: boolean };
+  type GameStatus = 'ready' | 'running' | 'paused' | 'won' | 'lost';
+  const factions = ref<Faction[]>([
+    { id: 1, name: 'Игрок', color: '#3b82f6', isEnemy: false },
+    { id: 2, name: 'Противник', color: '#dc2626', isEnemy: true },
+  ]);
+  const gameStatus = ref<GameStatus>('ready');
+  const scenarioTime = ref(0);
+  const gameMessage = ref('Нажмите «Запустить сценарий», чтобы начать игру.');
+  const isGameOver = computed(() => gameStatus.value === 'won' || gameStatus.value === 'lost');
+  let nextFactionId = 3;
+  let scenarioAttackTimer = 0;
+
   const effects = computed(() => gameState.value.effects);
   const combatVisuals = computed(() => gameState.value.combatVisuals);
   const selectedBuilding = computed(() => entities.value.find((e): e is Building => e.kind === 'building' && e.isSelected));
@@ -365,14 +378,54 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     const deltaSeconds = Math.min((time - lastTime) / 1000, 0.1);
     lastTime = time;
     updateCameraFromKeys(deltaSeconds);
-    processFrame(deltaSeconds);
-    cleanupMarkers();
+    if (gameStatus.value !== 'paused' && gameStatus.value !== 'won' && gameStatus.value !== 'lost') {
+      processFrame(deltaSeconds);
+      cleanupMarkers();
+    }
+    if (gameStatus.value === 'running') {
+      scenarioTime.value += deltaSeconds;
+      scenarioAttackTimer += deltaSeconds;
+      if (scenarioAttackTimer >= 0.8) {
+        scenarioAttackTimer = 0;
+        const aliveUnits = entities.value.filter((entity): entity is Unit => entity.kind === 'unit' && !entity.transportId);
+        for (const unit of aliveUnits) {
+          const unitFaction = factions.value.find(faction => faction.id === (unit.factionId ?? Number(unit.groupId)));
+          if (!unitFaction) continue;
+          const target = aliveUnits
+            .filter(other => other.id !== unit.id && factions.value.find(f => f.id === (other.factionId ?? Number(other.groupId)))?.isEnemy !== unitFaction.isEnemy)
+            .sort((a, b) => Math.hypot(a.x - unit.x, a.y - unit.y) - Math.hypot(b.x - unit.x, b.y - unit.y))[0];
+          if (target && unit.activeCommand?.type !== 'ATTACK') {
+            enqueue({ type: 'ATTACK_REQUESTED', entityId: unit.id, targetId: target.id });
+          }
+        }
+      }
+      const playerAlive = entities.value.some(entity => entity.kind === 'unit' && !factions.value.find(faction => faction.id === (entity.factionId ?? Number(entity.groupId)))?.isEnemy);
+      const enemiesAlive = entities.value.some(entity => entity.kind === 'unit' && factions.value.find(faction => faction.id === (entity.factionId ?? Number(entity.groupId)))?.isEnemy);
+      if (!enemiesAlive) {
+        gameStatus.value = 'won';
+        gameMessage.value = 'Победа! Вражеские отряды уничтожены.';
+      } else if (!playerAlive) {
+        gameStatus.value = 'lost';
+        gameMessage.value = 'Поражение. Ваши бойцы уничтожены.';
+      }
+    }
     rafId = requestAnimationFrame(loop);
+  };
+
+  const togglePause = () => {
+    if (gameStatus.value === 'running') {
+      gameStatus.value = 'paused';
+      gameMessage.value = 'Игра приостановлена.';
+    } else if (gameStatus.value === 'paused') {
+      gameStatus.value = 'running';
+      gameMessage.value = 'Игра продолжается.';
+    }
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
     const tag = (event.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (event.code === 'Space') { event.preventDefault(); togglePause(); return; }
     keys[event.key.toLowerCase()] = true;
   };
   const onKeyUp = (event: KeyboardEvent) => { keys[event.key.toLowerCase()] = false; };
@@ -387,7 +440,13 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     store.dispatch('game/clear');
     store.commit('game/CONFIGURE_RANDOM', random);
     const initialEntities = createStartingEntities();
-    initialEntities.forEach((entity) => enqueue({ type: 'ENTITY_ADDED', entity }));
+    initialEntities.forEach((entity) => {
+      entity.factionId = entity.color.toLowerCase() === '#dc2626' ? 2 : 1;
+      entity.groupId = entity.factionId === 1 ? 'player' : 'enemy';
+      enqueue({ type: 'ENTITY_ADDED', entity });
+    });
+    gameStatus.value = 'ready';
+    scenarioTime.value = 0;
 
     lastTime = 0;
     rafId = requestAnimationFrame(loop);
@@ -410,6 +469,57 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     if (!building) return;
     spawnMessage.value = selectedProducerCount.value >= PRODUCER_LIMIT ? 'Лимит: 20 живых юнитов.' : '';
     enqueue({ type: 'SPAWN_REQUESTED', buildingId: building.id, weapon: spawnWeapon.value });
+  };
+
+  const addFaction = () => {
+    const id = nextFactionId++;
+    const palette = ['#f97316', '#06b6d4', '#eab308', '#ec4899', '#a3e635'];
+    factions.value.push({ id, name: `Фракция ${id}`, color: palette[(id - 3) % palette.length]!, isEnemy: true });
+    return id;
+  };
+
+  const updateFaction = (id: number, changes: Partial<Pick<Faction, 'name' | 'isEnemy'>>) => {
+    const faction = factions.value.find(item => item.id === id);
+    if (!faction || id === 1 && changes.isEnemy) return;
+    Object.assign(faction, changes);
+    const teamId = faction.isEnemy ? 'enemy' : 'player';
+    entities.value.filter(entity => entity.factionId === id).forEach(entity => { entity.groupId = teamId; });
+  };
+
+  const removeFaction = (id: number) => {
+    if (id === 1) return;
+    entities.value.filter(entity => entity.factionId === id).forEach(entity => enqueue({ type: 'ENTITY_REMOVED', entityId: entity.id }));
+    factions.value = factions.value.filter(faction => faction.id !== id);
+  };
+
+  const spawnFactionUnit = (factionId: number) => {
+    const faction = factions.value.find(item => item.id === factionId);
+    if (!faction) return;
+    const center = isoToWorld(cameraX.value, cameraY.value);
+    const angle = Math.random() * Math.PI * 2;
+    const unit = createUnit(center.x + Math.cos(angle) * 2, center.y + Math.sin(angle) * 2, faction.color);
+    unit.factionId = faction.id;
+    unit.groupId = faction.isEnemy ? 'enemy' : 'player';
+    enqueue({ type: 'ENTITY_ADDED', entity: unit });
+  };
+
+  const startScenario = () => {
+    if (gameStatus.value === 'won' || gameStatus.value === 'lost') {
+      store.dispatch('game/clear');
+      factions.value.forEach((faction, index) => {
+        const teamId = faction.isEnemy ? 'enemy' : 'player';
+        const x = index % 2 === 0 ? -5 : 5;
+        const y = Math.floor(index / 2) * 3 - 2;
+        const unit = createUnit(x, y, faction.color);
+        unit.factionId = faction.id;
+        unit.groupId = teamId;
+        enqueue({ type: 'ENTITY_ADDED', entity: unit });
+      });
+    }
+    scenarioTime.value = 0;
+    scenarioAttackTimer = 0;
+    gameStatus.value = 'running';
+    gameMessage.value = 'Уничтожьте вражеские отряды. Пробел — пауза.';
   };
 
   const cameraWorld = computed(() => {
@@ -436,6 +546,8 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     cameraX, cameraY, zoom,
     viewportW, viewportH,
     entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, selectedProducerCount, PRODUCER_LIMIT,
+    factions, gameStatus, scenarioTime, gameMessage, isGameOver,
+    addFaction, removeFaction, updateFaction, spawnFactionUnit, startScenario, togglePause,
     selectedBoat, passengerCount, disembarkSelected, BOAT_CAPACITY, unitStatus, spawnWeapon, looseFormation, holdSelected, attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
     selectedEntities,
     applyDamage, destroyEntity, selfDestruct,
