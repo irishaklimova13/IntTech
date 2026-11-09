@@ -1,10 +1,29 @@
-# ADMIN APP
+# RTS Game
 
-## Copy files from container
+Клиентская часть командного проекта «RTS Game», разработанная с использованием Vue 3, Vuex, TypeScript и Vite.
+
+## Требования
+
+- Node.js 20.19+ или 22.12+.
+- npm.
+
+## Установка и запуск
+
+Из корневой папки репозитория:
+
+```bash
+cd vue
+npm install
+npm run dev
 ```
-sudo sh sh/copy_files_from_container.sh -i [container_id]
+
+После запуска Vite выведет адрес локального сервера.
+
+## Проверка
+
+```bash
+npm run build
+npm test
 ```
-This command will copy next directories and files:
-- dist/
-- node_modules/
-- package-lock.json
+
+Подробное описание реализованных игровых механик приведено в [IMPLEMENTATION.md](IMPLEMENTATION.md).
