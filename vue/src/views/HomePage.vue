@@ -523,7 +523,7 @@ onUnmounted(() => {
 .world { position: absolute; inset: 0; transform-origin: center center; will-change: transform; pointer-events: none; }
 
 .terrain-tile {
-  position: absolute; width: 66px; height: 34px; transform: translate(-50%, -50%);
+  position: absolute; width: 64px; height: 32px; transform: translate(-50%, -50%);
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
   box-sizing: border-box; overflow: hidden;
 }
