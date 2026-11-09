@@ -1,3 +1,5 @@
+import { WEAPONS, defaultWeapon, type WeaponType } from './weapons';
+import type { UnitPose } from './unitPresentation';
 import { UNIT_CHARACTERISTICS_BY_COLOR } from './unitTypes';
 
 export type TerrainType = 'land' | 'water';
@@ -41,7 +43,13 @@ export interface BaseEntity {
 
 export interface Unit extends BaseEntity {
   kind: 'unit';
+  weapon?: WeaponType;
+  stance?: 'defensive' | 'hold';
+  pose?: UnitPose;
   producerId?: string;
+  transportId?: string;
+  boardingTargetId?: string;
+  avoidance?: { side: number; blocked: number; wait: number };
   strength: number;
   movementSpeed: number;
   attackSpeed: number;
@@ -55,6 +63,7 @@ export interface Unit extends BaseEntity {
 
 export interface Building extends BaseEntity {
   kind: 'building';
+  rallyPoint?: PathNode;
   spawnType?: MovementType;
   typeId: string;
   name: string;
@@ -103,6 +112,7 @@ export const restoreEntityCharacteristics = <T extends Entity>(entity: T): T => 
 };
 
 export interface UnitCharacteristics {
+  weapon?: WeaponType;
   health?: number;
   maxHealth?: number;
   strength?: number;
@@ -121,7 +131,9 @@ export const createUnit = (
   characteristics: UnitCharacteristics = {},
 ): Unit => {
   characteristics = { ...UNIT_CHARACTERISTICS_BY_COLOR[color.toLowerCase()], ...characteristics };
+  const weapon = characteristics.weapon ?? defaultWeapon(color, movementType === 'water');
   return Object.defineProperties({
+    weapon, stance: 'defensive',
     id: `unit_${nextId++}`,
     kind: 'unit',
     x, y, color,
@@ -133,7 +145,7 @@ export const createUnit = (
     radius: 14,
     movementType,
     attackDamage: 25,
-    attackRange: 1.2,
+    attackRange: WEAPONS[weapon].range,
     hp: Math.min(nonNegative(characteristics.health, nonNegative(characteristics.maxHealth, 100)), nonNegative(characteristics.maxHealth, 100)),
     maxHp: nonNegative(characteristics.maxHealth, 100),
     isSelected: false,

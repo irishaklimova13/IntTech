@@ -1,3 +1,4 @@
+import { canTraverseTerrain } from './terrain';
 import { computed, ref } from 'vue';
 import { useStore, type Store } from 'vuex';
 import { isoToWorld, worldToIso, type Vec2 } from './iso';
@@ -9,6 +10,10 @@ import type { GameState, GameEventPayload } from '../store/game';
 import { buildingOccupiesTile, distanceFromBuildingFootprint } from './buildings';
 import type { BuildingType } from './entities';
 
+import { passengersOf, BOAT_CAPACITY } from './transports';
+import type { WeaponType } from './weapons';
+import { createStartingEntities } from './startingScene';
+
 export const useRtsGame = (random: () => number = Math.random, suppliedStore?: Store<any>) => {
   const store = suppliedStore ?? useStore();
   const gameState = computed(() => (store.state as { game: GameState }).game);
@@ -18,10 +23,17 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
   const combatVisuals = computed(() => gameState.value.combatVisuals);
   const selectedBuilding = computed(() => entities.value.find((e): e is Building => e.kind === 'building' && e.isSelected));
   const selectedProducerCount = computed(() => selectedBuilding.value ? producerCount(entities.value, selectedBuilding.value.id) : 0);
+  const selectedBoat = computed(() => entities.value.find((e): e is Unit => e.kind === 'unit' && e.isSelected && e.movementType === 'water'));
+  const passengerCount = computed(() => selectedBoat.value ? passengersOf(entities.value,selectedBoat.value.id).length : 0);
+  const disembarkSelected = () => { if (selectedBoat.value) enqueue({ type:'DISEMBARK_REQUESTED', boatId:selectedBoat.value.id }); };
+  const unitStatus = (u: Unit) => u.transportId ? 'На борту' : u.boardingTargetId ? 'Идёт к лодке' : (effects.value[u.id]?.healing ?? 0) > 0 ? 'Лечится' : effects.value[u.id]?.engaged ? 'В бою' : u.pose?.moving ? 'Перемещается' : u.stance === 'hold' ? 'Держит позицию' : 'Ожидает приказ';
+  const spawnWeapon = ref<WeaponType>('spear');
+  const looseFormation = ref(false);
+  const holdSelected = () => entities.value.filter(e => e.kind === 'unit' && e.isSelected).forEach(e => enqueue({ type: 'HOLD_REQUESTED', entityId: e.id }));
   const attackMoveMode = ref(false);
   const spawnMessage = ref('');
   const healMessage = ref('');
-  const isAttacking = (id: string) => entities.value.some(e => e.id === id && e.activeCommand?.type === 'ATTACK') || (effects.value[id]?.strike ?? 0) > 0;
+  const isAttacking = (id: string) => entities.value.some(e => e.id === id && (e.activeCommand?.type === 'ATTACK' || effects.value[id]?.engaged)) || (effects.value[id]?.strike ?? 0) > 0;
   const healSelected = () => {
     entities.value.filter(e => e.kind === 'unit' && e.isSelected).forEach(e => enqueue({ type: 'HEAL_REQUESTED', entityId: e.id }));
     healMessage.value = 'Лечение: 2 с без врагов в радиусе 3 клеток; перерыв 12 с.';
@@ -131,8 +143,8 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     const footprintOffset = entity.kind === 'building' ? (entity.sizeTiles - 1) / 2 : 0;
     const position = worldToScreen(entity.x + footprintOffset, entity.y + footprintOffset);
     if (entity.kind === 'unit') {
-      const bodyCenterY = position.y - 17 * zoom.value;
-      return Math.hypot(sx - position.x, sy - bodyCenterY) <= entity.radius * zoom.value;
+      const bodyCenterY = position.y - 23 * zoom.value;
+      return Math.hypot(sx - position.x, sy - bodyCenterY) <= Math.max(18, entity.radius) * zoom.value;
     }
     const halfWidth = 34 * entity.sizeTiles * zoom.value;
     const top = position.y - (60 + (entity.sizeTiles - 1) * 20) * zoom.value;
@@ -141,7 +153,7 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
   };
 
   const getEntityAt = (sx: number, sy: number): Entity | null => {
-    const frontToBack = [...entities.value].sort((a, b) => {
+    const frontToBack = entities.value.filter(e => e.kind !== 'unit' || !e.transportId).sort((a, b) => {
       const depth = (e: Entity) => e.x + e.y + (e.kind === 'building' ? e.sizeTiles - 1 : 0);
       return depth(b) - depth(a);
     });
@@ -171,9 +183,9 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     const maxY = Math.max(sy1, sy2);
 
     for (const entity of entities.value) {
-      if (entity.kind !== 'unit') continue;
+      if (entity.kind !== 'unit' || entity.transportId) continue;
       const position = worldToScreen(entity.x, entity.y);
-      const bodyCenterY = position.y - 17 * zoom.value;
+      const bodyCenterY = position.y - 23 * zoom.value;
       if (position.x >= minX && position.x <= maxX && bodyCenterY >= minY && bodyCenterY <= maxY) {
         entity.isSelected = true;
       }
@@ -217,7 +229,7 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
 
   const isTileBlockedForUnit = (unit: Unit, x: number, y: number): boolean =>
     !isInsideMap(x, y) ||
-    getTerrainAt(x, y) !== unit.movementType ||
+    !canTraverseTerrain(x, y, unit.movementType) ||
     entities.value.some((entity) =>
       entity.kind === 'building' && distanceFromBuildingFootprint(x, y, entity) < 0.8
     );
@@ -277,13 +289,13 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
         const overlapsAnotherUnit = entities.value.some((entity) =>
           entity.kind === 'unit' &&
           !selectedUnitIds.has(entity.id) &&
-          Math.hypot(entity.x - candidate.x, entity.y - candidate.y) < GROUP_UNIT_SPACING
+          Math.hypot(entity.x - candidate.x, entity.y - candidate.y) < (looseFormation.value ? 1.5 : GROUP_UNIT_SPACING)
         );
         if (overlapsAnotherUnit) continue;
 
         const overlapsReservedDestination = reservedDestinations.some(
           (destination) =>
-            Math.hypot(destination.x - candidate.x, destination.y - candidate.y) < GROUP_UNIT_SPACING
+            Math.hypot(destination.x - candidate.x, destination.y - candidate.y) < (looseFormation.value ? 1.5 : GROUP_UNIT_SPACING)
         );
         if (overlapsReservedDestination) continue;
 
@@ -309,14 +321,18 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     const aggressive = withAttack || attackMoveMode.value;
     attackMoveMode.value = false;
     const hit = getEntityAt(sx, sy);
-    if (hit) {
+    if (hit?.kind === 'unit' && hit.movementType === 'water') {
+      const boarding = entities.value.filter((e): e is Unit => e.kind === 'unit' && e.isSelected && !e.transportId && e.movementType === 'land' && !isEnemy(e,hit));
+      if (boarding.length) { boarding.forEach(e => enqueue({ type:'BOARD_REQUESTED', entityId:e.id, boatId:hit.id })); return; }
+    }
+    if (hit && !aggressive && entities.value.some(e => e.kind === 'unit' && e.isSelected && isEnemy(e, hit))) {
       entities.value.filter((e): e is Unit => e.kind === 'unit' && e.isSelected && isEnemy(e, hit)).forEach(unit =>
         enqueue({ type: 'ATTACK_REQUESTED', entityId: unit.id, targetId: hit.id, queued }));
       return;
     }
     const target = screenToWorld(sx, sy);
     const selectedUnits = entities.value.filter(
-      (entity): entity is Unit => entity.kind === 'unit' && entity.isSelected,
+      (entity): entity is Unit => entity.kind === 'unit' && !entity.transportId && entity.isSelected,
     );
     const selectedBuildings = entities.value.filter(
       (entity): entity is Building => entity.kind === 'building' && entity.isSelected,
@@ -334,18 +350,7 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
       });
     });
 
-    selectedBuildings.forEach((building, index) => {
-      const angle = (index / selectedBuildings.length) * Math.PI * 2;
-      const radius = selectedBuildings.length > 1 ? 1.5 : 0;
-      enqueue({
-        type: 'MOVE_REQUESTED',
-        entityId: building.id,
-        target: {
-          x: Math.round(target.x + Math.cos(angle) * radius),
-          y: Math.round(target.y + Math.sin(angle) * radius),
-        },
-      });
-    });
+    selectedBuildings.forEach(building => enqueue({ type:'RALLY_REQUESTED', buildingId:building.id, target }));
 
     markers.value.push({ id: ++markerSeq, x: target.x, y: target.y, born: performance.now() });
   };
@@ -381,20 +386,7 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     initialized = true;
     store.dispatch('game/clear');
     store.commit('game/CONFIGURE_RANDOM', random);
-    const initialEntities: Entity[] = [
-      createUnit(-2, 0, '#3b82f6', 'land'),
-      createUnit(2, 0, '#dc2626', 'land'),
-      createUnit(0, 2, '#16a34a', 'land'),
-      createUnit(-2, 2, '#9333ea', 'land'),
-      createUnit(5, 4, '#38bdf8', 'water'),
-      createBuilding(0, -2, '#3b82f6'),
-      createBuilding(3, -4, '#dc2626'),
-      createBuilding(-3, -1, '#16a34a'),
-      createBuilding(1, -5),
-    ];
-    const harbor = createBuilding(2, 4, '#38bdf8');
-    harbor.spawnType = 'water';
-    initialEntities.push(harbor);
+    const initialEntities = createStartingEntities();
     initialEntities.forEach((entity) => enqueue({ type: 'ENTITY_ADDED', entity }));
 
     lastTime = 0;
@@ -417,7 +409,7 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     const building = selectedBuilding.value;
     if (!building) return;
     spawnMessage.value = selectedProducerCount.value >= PRODUCER_LIMIT ? 'Лимит: 20 живых юнитов.' : '';
-    enqueue({ type: 'SPAWN_REQUESTED', buildingId: building.id });
+    enqueue({ type: 'SPAWN_REQUESTED', buildingId: building.id, weapon: spawnWeapon.value });
   };
 
   const cameraWorld = computed(() => {
@@ -444,7 +436,7 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     cameraX, cameraY, zoom,
     viewportW, viewportH,
     entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, selectedProducerCount, PRODUCER_LIMIT,
-    attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
+    selectedBoat, passengerCount, disembarkSelected, BOAT_CAPACITY, unitStatus, spawnWeapon, looseFormation, holdSelected, attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
     selectedEntities,
     applyDamage, destroyEntity, selfDestruct,
     cameraWorld, zoomDisplay, entityCount,

@@ -6,7 +6,8 @@ import gameModule from '../store/game';
 import { useRtsGame } from './useRtsGame';
 import { createBuilding, createUnit, type Unit } from './entities';
 import { buildingContains, createUnitActions } from './unitActions';
-import { getMapTiles, getTerrainAt } from './terrain';
+import { canTraverseTerrain, getMapTiles, getTerrainAt } from './terrain';
+import { LAND_WEAPONS, WEAPONS } from './weapons';
 
 test('attackers reserve distinct melee positions and release them on cancellation', () => {
   const target = createUnit(0, -6, 'red');
@@ -28,7 +29,7 @@ test('attackers reserve distinct melee positions and release them on cancellatio
 });
 
 // Drive the actual game's frame loop, movement and collisions, without DOM rendering.
-function battlefield(random: () => number = () => 1) {
+function battlefield(random: () => number = () => 1, mixed = false) {
   let frame: FrameRequestCallback = () => {};
   Object.assign(globalThis, {
     window: new EventTarget(),
@@ -50,7 +51,13 @@ function battlefield(random: () => number = () => 1) {
     for (const p of candidates) {
       const key = p.x + ':' + p.y;
       if (occupied.has(key)) continue;
-      occupied.add(key); army.push(createUnit(p.x, p.y, color));
+      occupied.add(key);
+      const weapon = LAND_WEAPONS[army.length % LAND_WEAPONS.length]!;
+      const spec = WEAPONS[weapon];
+      army.push(createUnit(p.x, p.y, color, 'land', mixed ? {
+        weapon, strength: spec.strength, maxHealth: spec.health, health: spec.health,
+        movementSpeed: spec.speed, attackSpeed: spec.attackSpeed,
+      } : {}));
       if (army.length === 20) break;
     }
     armies.push(army);
@@ -65,7 +72,7 @@ function battlefield(random: () => number = () => 1) {
     for (const u of game.entities.value) {
       assert.ok(Number.isFinite(u.x) && Number.isFinite(u.y));
       if (u.kind !== 'unit') continue;
-      assert.equal(getTerrainAt(Math.round(u.x), Math.round(u.y)), u.movementType, `invalid terrain ${u.id} (${u.x},${u.y})`);
+      assert.equal(canTraverseTerrain(u.x, u.y, u.movementType), true, `invalid terrain ${u.id} (${u.x},${u.y})`);
       assert.ok(!houses.some(b => Math.abs(u.x - b.x) < b.sizeTiles / 2 && Math.abs(u.y - b.y) < b.sizeTiles / 2), `inside building: ${u.id}`);
     }
   };
@@ -167,6 +174,25 @@ test('20 vs 20 with seeded ultimate hits and healing stays within terrain and ef
       if (b.game.combatVisuals.value.some(e => e.kind === 'ultimate')) ultimates++;
     }
     assert.ok(ultimates > 0);
+    assert.ok(b.game.entities.value.filter(e => e.kind === 'unit').length < 40);
+  } finally { b.game.destroy(); }
+});
+
+test('mixed 20 vs 20 with all five weapons preserves terrain, poses and effect limits', () => {
+  const b = battlefield(() => 1, true);
+  try {
+    b.command(b.armies[0]!, 9, 0); b.command(b.armies[1]!, -6, 0);
+    let shots = 0, moving = 0;
+    for (let i = 0; i < 600; i++) {
+      b.step();
+      assert.ok(b.game.combatVisuals.value.length <= 256);
+      if (b.game.combatVisuals.value.some(e => e.kind === 'projectile')) shots++;
+      for (const e of b.game.entities.value) if (e.kind === 'unit') {
+        assert.ok(e.pose && Number.isFinite(e.pose.phase));
+        if (e.pose.moving) moving++;
+      }
+    }
+    assert.ok(shots > 0); assert.ok(moving > 0);
     assert.ok(b.game.entities.value.filter(e => e.kind === 'unit').length < 40);
   } finally { b.game.destroy(); }
 });

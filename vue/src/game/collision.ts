@@ -1,3 +1,4 @@
+import { canTraverseTerrain } from './terrain';
 import type { Building, Entity, Unit } from './entities';
 import { getTerrainAt } from './terrain';
 import { buildingFootprintsOverlap, distanceFromBuildingFootprint } from './buildings';
@@ -15,9 +16,9 @@ const directionForPair = (firstId: string, secondId: string) => {
 };
 
 const canPlaceUnit = (unit: Unit, x: number, y: number, entities: Entity[]) => {
-  if (getTerrainAt(Math.round(x), Math.round(y)) !== unit.movementType) return false;
+  if (!canTraverseTerrain(x, y, unit.movementType)) return false;
   for (const entity of entities) {
-    if (entity.id === unit.id) continue;
+    if (entity.id === unit.id || (entity.kind === 'unit' && entity.transportId)) continue;
     const distance = Math.hypot(x - entity.x, y - entity.y);
     if (entity.kind === 'building' && distanceFromBuildingFootprint(x, y, entity) < UNIT_BUILDING_SEPARATION - EPSILON) return false;
     if (entity.kind === 'unit' && distance < UNIT_SEPARATION - EPSILON) return false;
@@ -51,7 +52,7 @@ const moveUnitAway = (
     ? { x: dx / length, y: dy / length }
     : directionForPair(unit.id, other.id);
 
-  for (const sign of [1, -1]) {
+  for (const sign of [1]) {
     const x = unit.x + direction.x * overlap * sign;
     const y = unit.y + direction.y * overlap * sign;
     if (canPlaceUnit(unit, x, y, entities)) {
@@ -63,7 +64,7 @@ const moveUnitAway = (
 
   for (let step = 1; step <= 8; step++) {
     const distance = overlap + step * 0.2;
-    for (const sign of [1, -1]) {
+    for (const sign of [1]) {
       const x = unit.x + direction.x * distance * sign;
       const y = unit.y + direction.y * distance * sign;
       if (canPlaceUnit(unit, x, y, entities)) {
@@ -100,7 +101,7 @@ const moveBuildingAway = (
 };
 
 export const resolveEntityCollisions = (entities: Entity[]): void => {
-  const units = entities.filter((entity): entity is Unit => entity.kind === 'unit');
+  const units = entities.filter((entity): entity is Unit => entity.kind === 'unit' && !entity.transportId);
   const buildings = entities.filter((entity): entity is Building => entity.kind === 'building');
 
   for (let pass = 0; pass < 3; pass++) {

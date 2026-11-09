@@ -1,5 +1,5 @@
 export interface CombatVisualEvent {
-  kind: 'hit' | 'death' | 'ultimate'; ultimate?: boolean; x: number; y: number; color: string;
+  kind: 'hit' | 'death' | 'ultimate' | 'projectile'; ultimate?: boolean; fromX?: number; fromY?: number; x: number; y: number; color: string;
 }
 export interface CombatVisual extends CombatVisualEvent { id: number; ttl: number; duration: number }
 
@@ -12,7 +12,7 @@ export function createCombatVisuals(items: CombatVisual[]) {
         const splash = items.findIndex(e => e.kind !== 'death');
         items.splice(splash < 0 ? 0 : splash, 1);
       }
-      const duration = event.kind === 'death' ? 15 : event.kind === 'ultimate' ? 0.22 : 0.6;
+      const duration = event.kind === 'projectile' ? 0.2 : event.kind === 'death' ? 15 : event.kind === 'ultimate' ? 0.22 : 0.6;
       items.push({ ...event, id: ++sequence, ttl: duration, duration });
     },
     tick(dt: number) {

@@ -1,4 +1,8 @@
+import { canTraverseTerrain } from './terrain';
 import type { Building, Entity, ICommand, Unit } from './entities';
+import { requestBoard, disembark, updateTransports } from './transports';
+import { findNearestTerrainTile } from './terrain';
+import { updateUnitPose } from './unitPresentation';
 import type { GameEvent } from '../store/game';
 import { findPath } from './pathfinding';
 import { buildingFootprintsOverlap, buildingOccupiesTile, distanceFromBuildingFootprint } from './buildings';
@@ -12,7 +16,7 @@ import { resolveEntityCollisions } from './collision';
 const UNIT_SEPARATION = 0.8;
 
 const isBlockedFor = (entities: Entity[], movementType: Unit['movementType'], x: number, y: number) => {
-  if (!isInsideMap(x, y) || getTerrainAt(x, y) !== movementType) return true;
+  if (!isInsideMap(x, y) || !canTraverseTerrain(x, y, movementType)) return true;
   return entities.some((entity) =>
     entity.kind === 'building' && distanceFromBuildingFootprint(x, y, entity) < 0.8 - 0.0001
   );
@@ -25,7 +29,7 @@ const findUnitPath = (unit: Unit, target: { x: number; y: number }, entities: En
     target.x,
     target.y,
     (x, y) => {
-      if (getTerrainAt(x, y) !== unit.movementType) return true;
+      if (!canTraverseTerrain(x, y, unit.movementType)) return true;
       const nearBuilding = (p: { x: number; y: number }) => entities.some(e => e.kind === 'building' && distanceFromBuildingFootprint(p.x, p.y, e) < 0.8 - 0.0001);
       if (x === Math.round(target.x) && y === Math.round(target.y) && !nearBuilding(target)) return false;
       if (x === Math.round(unit.x) && y === Math.round(unit.y) && !nearBuilding(unit)) return false;
@@ -75,10 +79,10 @@ const isBuildingPositionFree = (building: Building, x: number, y: number, entiti
 
 const isUnitPositionFree = (unit: Unit, x: number, y: number, entities: Entity[]) => {
   if (!isInsideMap(Math.round(x), Math.round(y)) ||
-      getTerrainAt(Math.round(x), Math.round(y)) !== unit.movementType) return false;
+      !canTraverseTerrain(x, y, unit.movementType)) return false;
 
   return entities.every((entity) => {
-    if (entity.id === unit.id) return true;
+    if (entity.id === unit.id || (entity.kind === 'unit' && entity.transportId)) return true;
     return entity.kind === 'unit'
       ? Math.hypot(x - entity.x, y - entity.y) >= UNIT_SEPARATION - 0.0001
       : distanceFromBuildingFootprint(x, y, entity) >= 0.8 - 0.0001;
@@ -105,7 +109,42 @@ const applyEvents = (entities: Entity[], events: GameEvent[], combat?: Combat) =
       }
       case 'SPAWN_REQUESTED': {
         const building = entities.find((e): e is Building => e.kind === 'building' && e.id === event.buildingId);
-        if (building && spawnFromBuilding(entities, building) && combat) combat.effect(building.id).smoke = 1.5;
+        if (building) {
+          const unit = spawnFromBuilding(entities, building, event.weapon);
+          if (unit && combat) {
+            combat.effect(building.id).smoke = 1.5;
+            if (building.rallyPoint) {
+              const point = findNearestTerrainTile(building.rallyPoint.x, building.rallyPoint.y, unit.movementType,
+                (x,y) => entities.some(e => e.id !== unit.id && (e.kind === 'building' ? distanceFromBuildingFootprint(x,y,e) < .8 : !e.transportId &&
+                  (Math.hypot(e.x-x,e.y-y) < .85 || (e.path.length > 0 && Math.hypot(e.path.at(-1)!.x-x,e.path.at(-1)!.y-y) < .85)))));
+              if (point) combat.move(unit,point);
+            }
+          }
+        }
+        break;
+      }
+      case 'BOARD_REQUESTED': {
+        const unit = entities.find((e): e is Unit => e.kind === 'unit' && e.id === event.entityId);
+        const boat = entities.find((e): e is Unit => e.kind === 'unit' && e.id === event.boatId);
+        if (unit && boat && requestBoard(entities,unit,boat)) combat?.cancel(unit);
+        break;
+      }
+      case 'DISEMBARK_REQUESTED': {
+        const boat = entities.find((e): e is Unit => e.kind === 'unit' && e.id === event.boatId);
+        if (boat) disembark(entities,boat);
+        break;
+      }
+      case 'RALLY_REQUESTED': {
+        const building = entities.find((e): e is Building => e.kind === 'building' && e.id === event.buildingId);
+        if (building) {
+          const point = findNearestTerrainTile(event.target.x,event.target.y,building.spawnType ?? 'land');
+          if (point) building.rallyPoint = point;
+        }
+        break;
+      }
+      case 'HOLD_REQUESTED': {
+        const unit = entities.find((e): e is Unit => e.kind === 'unit' && e.id === event.entityId);
+        if (unit && combat) { combat.hold(unit); unit.commandsQueue = []; unit.activeCommand = null; }
         break;
       }
       case 'ATTACK_REQUESTED':
@@ -125,7 +164,9 @@ const applyEvents = (entities: Entity[], events: GameEvent[], combat?: Combat) =
       case 'MOVE_REQUESTED': {
         const entity = entities.find((item) => item.id === event.entityId);
         if (!entity) break;
+        if (entity.kind === 'unit' && entity.transportId) break;
         if (entity.kind === 'unit') {
+          delete entity.boardingTargetId;
           const command: ICommand = { type: event.attackMove ? 'ATTACK_MOVE' : 'MOVE', x: event.target.x, y: event.target.y };
           if (event.queued) {
             if (entity.activeCommand || entity.path.length > 0) {
@@ -156,7 +197,10 @@ const findSafeUnitStep = (
   target: { x: number; y: number },
   step: number,
   entities: Entity[],
+  dt: number,
 ): { x: number; y: number; direct: boolean } => {
+  const avoidance = unit.avoidance ?? (unit.avoidance = { side: unit.id.charCodeAt(unit.id.length - 1) % 2 ? -1 : 1, blocked: 0, wait: 0 });
+  if (avoidance.wait > 0) { avoidance.wait = Math.max(0, avoidance.wait - dt); return { x: unit.x, y: unit.y, direct: false }; }
   const dx = target.x - unit.x;
   const dy = target.y - unit.y;
   const distance = Math.hypot(dx, dy);
@@ -165,27 +209,29 @@ const findSafeUnitStep = (
   const directX = distance <= step ? target.x : unit.x + (dx / distance) * step;
   const directY = distance <= step ? target.y : unit.y + (dy / distance) * step;
   if (isUnitPositionFree(unit, directX, directY, entities)) {
+    avoidance.blocked = 0;
     return { x: directX, y: directY, direct: true };
   }
 
-  // If another unit blocks the direct step, slide sideways instead of pushing
-  // against it every frame. The original waypoint remains the movement target.
-  const sideX = -dy / distance;
-  const sideY = dx / distance;
-  const preferredSign = unit.id.charCodeAt(unit.id.length - 1) % 2 === 0 ? 1 : -1;
-  for (const sign of [preferredSign, -preferredSign]) {
-    const x = unit.x + sideX * step * sign;
-    const y = unit.y + sideY * step * sign;
+  // Keep a detour side between frames. Trying opposite sides every frame creates visible jitter.
+  const sideX = -dy / distance, sideY = dx / distance;
+  for (const angle of [Math.PI / 4, Math.PI * .4, Math.PI / 2, Math.PI * .65]) {
+    const x = unit.x + (dx / distance * Math.cos(angle) + sideX * Math.sin(angle) * avoidance.side) * step;
+    const y = unit.y + (dy / distance * Math.cos(angle) + sideY * Math.sin(angle) * avoidance.side) * step;
     if (isUnitPositionFree(unit, x, y, entities)) {
+      avoidance.blocked = 0;
       return { x, y, direct: false };
     }
   }
+  avoidance.blocked += dt;
+  if (avoidance.blocked >= .6) { avoidance.side *= -1; avoidance.blocked = 0; avoidance.wait = .15; }
 
   return { x: unit.x, y: unit.y, direct: false };
 };
 
 const advanceMovement = (entities: Entity[], deltaSeconds: number, combat?: Combat) => {
   for (const entity of entities) {
+    if (entity.kind === 'unit' && entity.transportId) continue;
     if (entity.kind === 'unit' && entity.path.length === 0) {
       finishMoveCommandIfNeeded(entity, entities, combat);
     }
@@ -200,7 +246,7 @@ const advanceMovement = (entities: Entity[], deltaSeconds: number, combat?: Comb
       for (let i = 1; i <= samples; i++) {
         const x = entity.x + (target.x - entity.x) * i / samples;
         const y = entity.y + (target.y - entity.y) * i / samples;
-        if (getTerrainAt(Math.round(x), Math.round(y)) !== entity.movementType ||
+        if (!canTraverseTerrain(x, y, entity.movementType) ||
           entities.some(e => e.kind === 'building' && distanceFromBuildingFootprint(x, y, e) < 0.8 - 0.0001)) { clear = false; break; }
       }
       if (!clear) {
@@ -229,7 +275,7 @@ const advanceMovement = (entities: Entity[], deltaSeconds: number, combat?: Comb
     const step = (entity.kind === 'unit' ? movementSpeed(entity) : entity.speed) * deltaSeconds;
 
     if (entity.kind === 'unit') {
-      const next = findSafeUnitStep(entity, target, step, entities);
+      const next = findSafeUnitStep(entity, target, step, entities, deltaSeconds);
       entity.x = next.x;
       entity.y = next.y;
       if (next.direct && (distance <= step || distance < 0.0001)) entity.path.shift();
@@ -263,6 +309,7 @@ export const advanceFrame = (
 ): Entity[] => {
   const entities = currentEntities.map((entity) => restoreEntityCharacteristics({
     ...entity,
+    ...(entity.kind === 'unit' && entity.avoidance ? { avoidance: { ...entity.avoidance } } : {}),
     path: entity.path.map((point) => ({ ...point })),
     commandsQueue: entity.commandsQueue.map((command) => ({ ...command })),
     activeCommand: entity.activeCommand ? { ...entity.activeCommand } : null,
@@ -270,8 +317,12 @@ export const advanceFrame = (
   combat?.setEntities(entities);
   applyEvents(entities, pendingEvents, combat);
   const dt = Math.max(0, Math.min(deltaSeconds, 0.1));
+  updateTransports(entities, combat);
   combat?.tick(dt);
   advanceMovement(entities, dt, combat);
   resolveEntityCollisions(entities);
+  updateTransports(entities, combat);
+  const previous = new Map(currentEntities.map(e => [e.id, e]));
+  for (const entity of entities) if (entity.kind === 'unit') updateUnitPose(entity, previous.get(entity.id));
   return entities;
 };

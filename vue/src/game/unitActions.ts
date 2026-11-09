@@ -1,3 +1,5 @@
+import { canTraverseTerrain } from './terrain';
+import { WEAPONS, rangedWeapon, type WeaponType } from './weapons';
 import { createUnit, type Building, type Entity, type Unit } from './entities';
 import { findNearestTerrainTile, getTerrainAt } from './terrain';
 import { findPath, type Point } from './pathfinding';
@@ -13,7 +15,7 @@ export const PRODUCER_LIMIT = 20;
 export const producerCount = (entities: Entity[], id: string) =>
   entities.filter(e => e.kind === 'unit' && e.producerId === id && e.hp > 0).length;
 
-export function spawnFromBuilding(entities: Entity[], building: Building): Unit | null {
+export function spawnFromBuilding(entities: Entity[], building: Building, weapon?: WeaponType): Unit | null {
   if (!entities.includes(building) || building.hp <= 0) return null;
   if (producerCount(entities, building.id) >= PRODUCER_LIMIT) return null;
   const movement = building.spawnType ?? 'land';
@@ -27,11 +29,16 @@ export function spawnFromBuilding(entities: Entity[], building: Building): Unit 
     }
   }
   points.sort((a, b) => Math.hypot(a.x - centerX, a.y - centerY) - Math.hypot(b.x - centerX, b.y - centerY));
-  const place = points.find(p => getTerrainAt(p.x, p.y) === movement && !entities.some(e =>
-    e.kind === 'building' ? distanceFromBuildingFootprint(p.x, p.y, e) < 0.8 : Math.hypot(e.x - p.x, e.y - p.y) < 0.85,
+  const place = points.find(p => canTraverseTerrain(p.x, p.y, movement) && !entities.some(e =>
+    e.kind === 'building' ? distanceFromBuildingFootprint(p.x, p.y, e) < 0.8 : !e.transportId && Math.hypot(e.x - p.x, e.y - p.y) < 0.85,
   ));
   if (!place) return null;
-  const unit = createUnit(place.x, place.y, building.color, movement);
+  const chosen = movement === 'water' ? 'harpoon' : weapon;
+  const spec = chosen ? WEAPONS[chosen] : undefined;
+  const unit = createUnit(place.x, place.y, building.color, movement, spec ? {
+    weapon: chosen, strength: spec.strength, maxHealth: spec.health, health: spec.health,
+    movementSpeed: spec.speed, attackSpeed: spec.attackSpeed,
+  } : {});
   unit.groupId = building.groupId;
   unit.producerId = building.id;
   entities.push(unit);
@@ -48,7 +55,7 @@ interface Attack {
 }
 export interface UnitEffects {
   hit: number; rest: number; smoke: number; strike: number; ultimate: number;
-  facingLeft: boolean; healing: number;
+  facingLeft: boolean; healing: number; engaged: boolean;
 }
 
 export function createUnitActions(
@@ -74,26 +81,36 @@ export function createUnitActions(
   let clock = 0;
   let scanIn = 0;
   const effect = (id: string) => effects[id] ?? (effects[id] = {
-    hit: 0, rest: 0, smoke: 0, strike: 0, ultimate: 0, facingLeft: false, healing: 0,
+    hit: 0, rest: 0, smoke: 0, strike: 0, ultimate: 0, facingLeft: false, healing: 0, engaged: false,
   });
-  const blocked = (u: Unit, x: number, y: number) => getTerrainAt(x, y) !== u.movementType ||
+  const blocked = (u: Unit, x: number, y: number) => !canTraverseTerrain(x, y, u.movementType) ||
     entities.some(e => e.kind === 'building' && distanceFromBuildingFootprint(x, y, e) < 0.8 - 0.0001);
   const distance = (u: Unit, target: Entity) => target.kind === 'unit'
     ? Math.hypot(u.x - target.x, u.y - target.y)
     : distanceFromBuildingFootprint(u.x, u.y, target);
-  const inRange = (u: Unit, target: Entity) => distance(u, target) <= (u.attackRange ?? 1.15);
+  const clearShot = (u: Unit, target: Entity) => {
+    if (!rangedWeapon(u.weapon)) return true;
+    const n = Math.ceil(Math.hypot(target.x - u.x, target.y - u.y) * 5);
+    for (let i = 1; i < n; i++) {
+      const x = u.x + (target.x - u.x) * i / n, y = u.y + (target.y - u.y) * i / n;
+      if (entities.some(e => e.kind === 'building' && e.id !== target.id && buildingContains(e, Math.round(x), Math.round(y)))) return false;
+    }
+    return true;
+  };
+  const inRange = (u: Unit, target: Entity) => distance(u, target) <= (u.attackRange ?? 1.15) && clearShot(u, target);
   const approach = (u: Unit, target: Entity, reserve = false): Point[] => {
-    const available = (p: Point) => getTerrainAt(Math.round(p.x), Math.round(p.y)) === u.movementType &&
+    const available = (p: Point) => canTraverseTerrain(p.x, p.y, u.movementType) &&
       !entities.some(e => e.kind === 'building' && distanceFromBuildingFootprint(p.x, p.y, e) < 0.8) &&
       inRange({ ...u, ...p }, target) &&
-      !entities.some(e => e.kind === 'unit' && e.id !== u.id && e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) < 0.8) &&
+      !entities.some(e => e.kind === 'unit' && !e.transportId && e.id !== u.id && e.hp > 0 && Math.hypot(e.x - p.x, e.y - p.y) < 0.8) &&
       ![...slots].some(([id, slot]) => id !== u.id && Math.hypot(slot.point.x - p.x, slot.point.y - p.y) < 0.8);
     const candidates: Point[] = [];
     if (target.kind === 'unit') {
       // Eight melee positions, separated by more than the collision diameter.
       for (let i = 0; i < 8; i++) {
         const angle = i * Math.PI / 4;
-        candidates.push({ x: target.x + Math.cos(angle) * 1.1, y: target.y + Math.sin(angle) * 1.1 });
+        const radius = rangedWeapon(u.weapon) ? u.attackRange * .8 : 1.1;
+        candidates.push({ x: target.x + Math.cos(angle) * radius, y: target.y + Math.sin(angle) * radius });
       }
     } else {
       const left = Math.round(target.x) - 0.5;
@@ -139,7 +156,7 @@ export function createUnitActions(
   // A move order always wins over automatic retaliation, including during a swing.
   const cancel = (u: Unit) => { medicine(u).drinking = 0; medicine(u).pending = false; effect(u.id).healing = 0; marches.delete(u.id); peaceful.delete(u.id); finish(u); disengaged.set(u.id, 1.5); };
   const begin = (u: Unit, target: Entity, defensive: boolean) => {
-    if (u.hp <= 0 || target.hp <= 0 || !isEnemy(u, target)) return false;
+    if (u.transportId || (target.kind === 'unit' && target.transportId) || u.hp <= 0 || target.hp <= 0 || !isEnemy(u, target)) return false;
     const current = orders.get(u.id);
     if (current?.targetId === target.id) { if (!defensive) current.defensive = false; return true; }
     medicine(u).drinking = 0; medicine(u).pending = false; effect(u.id).healing = 0;
@@ -150,20 +167,22 @@ export function createUnitActions(
   };
   const defend = (victim: Entity, attacker: Unit) => {
     for (const candidate of entities) {
-      if (candidate.kind !== 'unit' || candidate.hp <= 0 || isEnemy(candidate, victim) ||
+      if (candidate.kind !== 'unit' || candidate.transportId || candidate.hp <= 0 || isEnemy(candidate, victim) ||
         !isEnemy(candidate, attacker) || candidate.path.length || orders.has(candidate.id) || (medicines.get(candidate.id)?.drinking ?? 0) > 0 ||
         (disengaged.get(candidate.id) ?? 0) > 0 || peaceful.has(candidate.id)) continue;
-      if (candidate.id === victim.id || distance(candidate, victim) <= 3) begin(candidate, attacker, true);
+      if ((candidate.stance !== 'hold' || inRange(candidate, attacker)) && (candidate.id === victim.id || distance(candidate, victim) <= 3)) begin(candidate, attacker, true);
     }
   };
   const attack = (u: Unit, target: Entity) => {
-    if (u.hp <= 0 || target.hp <= 0 || !isEnemy(u, target)) return false;
+    u.stance = 'defensive';
+    if (u.transportId || (target.kind === 'unit' && target.transportId) || u.hp <= 0 || target.hp <= 0 || !isEnemy(u, target)) return false;
     marches.delete(u.id); peaceful.delete(u.id);
     const accepted = begin(u, target, false);
     if (accepted) { disengaged.delete(u.id); defend(target, u); }
     return accepted;
   };
   const attackMove = (u: Unit, target: Point) => {
+    u.stance = 'defensive';
     cancel(u);
     const goal = findNearestTerrainTile(target.x, target.y, u.movementType,
       (x, y) => blocked(u, x, y));
@@ -176,6 +195,7 @@ export function createUnitActions(
     return true;
   };
   const move = (u: Unit, target: Point) => {
+    u.stance = 'defensive';
     cancel(u);
     // Keep a valid exact click: rounding a short retreat back to the current tile
     // would make the soldier stop and immediately acquire the same opponent again.
@@ -192,10 +212,10 @@ export function createUnitActions(
     u.path = path;
     return true;
   };
-  const enemiesNearby = (u: Unit) => entities.some(e => e.kind === 'unit' && e.hp > 0 && isEnemy(u, e) && distance(u, e) <= 3);
+  const enemiesNearby = (u: Unit) => entities.some(e => e.kind === 'unit' && !e.transportId && e.hp > 0 && isEnemy(u, e) && distance(u, e) <= 3);
   const heal = (u: Unit) => {
     const state = medicine(u);
-    if (u.hp <= 0 || u.hp >= u.maxHp || state.cooldown > 0 || state.drinking > 0 || enemiesNearby(u)) return false;
+    if (u.transportId || u.hp <= 0 || u.hp >= u.maxHp || state.cooldown > 0 || state.drinking > 0 || enemiesNearby(u)) return false;
     cancel(u);
     state.drinking = 2; state.hp = u.hp;
     effect(u.id).healing = 0.01;
@@ -249,10 +269,10 @@ export function createUnitActions(
     if (scanIn <= 0) {
       scanIn = 0.25;
       for (const unit of entities) {
-        if (unit.kind !== 'unit' || unit.hp <= 0 || orders.has(unit.id) || (medicines.get(unit.id)?.drinking ?? 0) > 0 ||
+        if (unit.kind !== 'unit' || unit.transportId || unit.hp <= 0 || orders.has(unit.id) || (medicines.get(unit.id)?.drinking ?? 0) > 0 ||
           peaceful.has(unit.id) || (disengaged.get(unit.id) ?? 0) > 0 || (unit.path.length && !marches.has(unit.id))) continue;
-        const enemies = entities.filter((e): e is Unit => e.kind === 'unit' && e.hp > 0 &&
-          isEnemy(unit, e) && distance(unit, e) <= 3 && !ignored.has(unit.id + ':' + e.id));
+        const enemies = entities.filter((e): e is Unit => e.kind === 'unit' && !e.transportId && e.hp > 0 &&
+          isEnemy(unit, e) && distance(unit, e) <= Math.max(3, unit.attackRange) && (unit.stance !== 'hold' || inRange(unit, e)) && !ignored.has(unit.id + ':' + e.id));
         enemies.sort((a, b) => distance(unit, a) - distance(unit, b));
         for (const enemy of enemies) {
           if (inRange(unit, enemy) || approach(unit, enemy).length) {
@@ -276,6 +296,7 @@ export function createUnitActions(
       effect(id).facingLeft = (target.x - unit.x) - (target.y - unit.y) < 0;
       order.repath -= dt;
       if (!inRange(unit, target)) {
+        if (unit.stance === 'hold') { finish(unit); continue; }
         order.windup = -1;
         effect(id).strike = 0;
         if (order.repath <= 0) { unit.path = approach(unit, target, true); order.repath = 0.4; }
@@ -307,11 +328,14 @@ export function createUnitActions(
         onVisual({ kind: 'ultimate', x: target.x, y: target.y, color: attacker.color });
         if (target.kind === 'unit') ultimateVictims.add(target.id);
       }
+      if (rangedWeapon(attacker.weapon) && damage > 0) onVisual({ kind: 'projectile', x: target.x, y: target.y,
+        fromX: attacker.x, fromY: attacker.y, color: attacker.color });
       target.hp = Math.max(0, target.hp - damage);
       effect(target.id).hit = 0.35;
       if (damage > 0 && target.kind === 'unit') onVisual({ kind: 'hit', x: target.x, y: target.y, color: target.color });
       defend(target, attacker);
     }
+    for (const e of entities) if (e.kind === 'unit') effect(e.id).engaged = orders.has(e.id);
     for (let i = entities.length - 1; i >= 0; i--) {
       const entity = entities[i]!;
       if (entity.hp > 0) continue;
@@ -320,6 +344,7 @@ export function createUnitActions(
     }
   };
   return { attack, attackMove, move, heal, cancel,
+    hold: (u: Unit) => { cancel(u); disengaged.delete(u.id); u.stance = 'hold'; },
     setEntities: (next: Entity[]) => { entities = next; },
     isBusy: (id: string) => orders.has(id) || marches.has(id) || (medicines.get(id)?.drinking ?? 0) > 0, tick, effect, isAttacking: (id: string) => orders.has(id),
     getAttackSlot: (id: string) => slots.get(id)?.point };

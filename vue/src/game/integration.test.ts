@@ -48,7 +48,7 @@ test('atomic spawn events respect 20 slots and 3x3 footprints; removal frees a s
 
 test('attack approach reaches a large building and uses existing attackDamage stat', () => {
   const unit = createUnit(-4, -4, 'blue');
-  unit.attackDamage = 37;
+  unit.attackDamage = 37; unit.strength = 37;
   const building = createBuilding(0, -4, { sizeTiles: 3, color: 'red', maxHp: 5000 });
   const b = setup([unit, building]);
   b.event({ type: 'ATTACK_REQUESTED', entityId: unit.id, targetId: building.id });
@@ -80,4 +80,23 @@ test('Vuex healing progresses across copied frames and a move cancels it', () =>
   b.event({ type: 'MOVE_REQUESTED', entityId: unit.id, target: { x: -9, y: -6 } }); b.step(50);
   assert.equal(b.get(unit.id).hp, 75);
   assert.equal(b.state().effects[unit.id]?.healing, 0);
+});
+
+test('recruitment weapon and hold command survive the shared frame/event pipeline', () => {
+  const house = createBuilding(-6, -6, 'blue');
+  const b = setup([house]);
+  b.event({ type: 'SPAWN_REQUESTED', buildingId: house.id, weapon: 'bow' }); b.step();
+  const archer = b.state().entities.find(e => e.kind === 'unit')!;
+  assert.equal(archer.kind, 'unit');
+  if (archer.kind !== 'unit') return;
+  assert.equal(archer.weapon, 'bow'); assert.equal(archer.attackRange, 4.5);
+  b.event({ type: 'MOVE_REQUESTED', entityId: archer.id, target: { x: -9, y: -9 } }); b.step(3);
+  b.event({ type: 'HOLD_REQUESTED', entityId: archer.id }); b.step();
+  const held = b.get(archer.id);
+  assert.equal(held.kind === 'unit' && held.stance, 'hold');
+  assert.equal(held.path.length, 0); assert.equal(held.commandsQueue.length, 0);
+  b.step(10);
+  assert.equal(b.get(archer.id).kind === 'unit' && (b.get(archer.id) as typeof archer).pose?.moving, false);
+  b.event({ type: 'MOVE_REQUESTED', entityId: archer.id, target: { x: -9, y: -9 } }); b.step();
+  assert.equal((b.get(archer.id) as typeof archer).stance, 'defensive');
 });

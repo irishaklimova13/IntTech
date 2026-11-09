@@ -1,4 +1,5 @@
 import type { Module } from 'vuex';
+import type { WeaponType } from '../game/weapons';
 import type { Entity } from '../game/entities';
 import { advanceFrame } from '../game/frame';
 import { createUnitActions, type UnitEffects } from '../game/unitActions';
@@ -9,8 +10,12 @@ export type GameEventPayload =
   | { type: 'ENTITY_ADDED'; entity: Entity }
   | { type: 'ENTITY_REMOVED'; entityId: string }
   | { type: 'MOVE_REQUESTED'; entityId: string; target: { x: number; y: number }; queued?: boolean; attackMove?: boolean }
-  | { type: 'SPAWN_REQUESTED'; buildingId: string }
+  | { type: 'SPAWN_REQUESTED'; buildingId: string; weapon?: WeaponType }
   | { type: 'ATTACK_REQUESTED'; entityId: string; targetId: string; queued?: boolean }
+  | { type: 'BOARD_REQUESTED'; entityId: string; boatId: string }
+  | { type: 'DISEMBARK_REQUESTED'; boatId: string }
+  | { type: 'RALLY_REQUESTED'; buildingId: string; target: { x: number; y: number } }
+  | { type: 'HOLD_REQUESTED'; entityId: string }
   | { type: 'HEAL_REQUESTED'; entityId: string; queued?: boolean };
 
 export type GameEvent = GameEventPayload & { id: number };
