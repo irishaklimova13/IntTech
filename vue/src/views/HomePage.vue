@@ -51,10 +51,12 @@
 
     <section class="faction-panel" aria-label="Управление фракциями">
       <strong>Фракции:</strong>
+      <span class="faction-participants">Участников: {{ factionParticipantCount }}</span>
       <div v-for="faction in factions" :key="faction.id" class="faction-item">
         <span class="faction-dot" :style="{ background: faction.color }"></span>
         <span>{{ faction.name }}</span>
         <span class="faction-role">{{ faction.isEnemy ? 'Враг' : 'Союзник' }}</span>
+        <span class="faction-count">Юнитов: {{ factionUnitCounts[faction.id] ?? 0 }}</span>
         <button class="faction-action" @click="spawnFactionUnit(faction.id)">+ Юнит</button>
         <button class="faction-action" :disabled="faction.id === 1" @click="updateFaction(faction.id, { isEnemy: !faction.isEnemy })">{{ faction.isEnemy ? 'Сделать союзником' : 'Сделать врагом' }}</button>
         <button v-if="faction.id !== 1" class="faction-remove" @click="removeFaction(faction.id)" aria-label="Удалить фракцию">×</button>
@@ -190,7 +192,7 @@ const {
   entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, selectedProducerCount, PRODUCER_LIMIT,
   selectedBoat, passengerCount, disembarkSelected, BOAT_CAPACITY, unitStatus, spawnWeapon, looseFormation, holdSelected, attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
   selectedEntities, selfDestruct,
-  factions, gameStatus, scenarioTime, gameMessage,
+  factions, factionParticipantCount, factionUnitCounts, gameStatus, scenarioTime, gameMessage,
   addFaction, removeFaction, updateFaction, spawnFactionUnit, startScenario, togglePause,
   cameraWorld, zoomDisplay, entityCount,
   zoomAt,

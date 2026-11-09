@@ -32,6 +32,18 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
   let nextFactionId = 3;
   let scenarioAttackTimer = 0;
 
+  const factionParticipantCount = computed(() => factions.value.length);
+  const factionUnitCounts = computed<Record<number, number>>(() => {
+    const counts: Record<number, number> = {};
+    for (const faction of factions.value) counts[faction.id] = 0;
+    for (const entity of entities.value) {
+      if (entity.kind !== 'unit') continue;
+      const factionId = entity.factionId;
+      if (factionId !== undefined && counts[factionId] !== undefined) counts[factionId] += 1;
+    }
+    return counts;
+  });
+
   const effects = computed(() => gameState.value.effects);
   const combatVisuals = computed(() => gameState.value.combatVisuals);
   const selectedBuilding = computed(() => entities.value.find((e): e is Building => e.kind === 'building' && e.isSelected));
@@ -471,10 +483,45 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     enqueue({ type: 'SPAWN_REQUESTED', buildingId: building.id, weapon: spawnWeapon.value });
   };
 
+  const factionBaseCandidates = [
+    { x: 0, y: -9 }, { x: 9, y: -8 }, { x: 0, y: 9 }, { x: -9, y: 8 },
+    { x: 9, y: 9 }, { x: -9, y: -9 }, { x: 0, y: 6 }, { x: 0, y: -6 },
+  ];
+
+  const factionTeamId = (faction: Faction) => faction.isEnemy ? 'enemy' : 'player';
+  const assignFaction = <T extends Entity>(entity: T, faction: Faction): T => {
+    entity.factionId = faction.id;
+    entity.groupId = factionTeamId(faction);
+    return entity;
+  };
+
+  const findFactionBase = () => factionBaseCandidates.find(({ x, y }) => {
+    const tiles = [{ x, y }, { x: x + 2, y }, { x: x + 1, y: y + 1 }, { x: x + 2, y: y + 1 }];
+    return tiles.every(tile => isInsideMap(tile.x, tile.y) && getTerrainAt(tile.x, tile.y) === 'land' &&
+      !entities.value.some(entity => entity.kind === 'building' && buildingOccupiesTile(entity, tile.x, tile.y)));
+  });
+
+  const createFactionBase = (faction: Faction) => {
+    const base = findFactionBase();
+    if (!base) return;
+    const buildings = [
+      createBuilding(base.x, base.y, { id: 'house', name: 'Дом', sizeTiles: 1, color: faction.color }),
+      createBuilding(base.x + 2, base.y, { id: 'house', name: 'Дом', sizeTiles: 1, color: faction.color }),
+    ];
+    buildings.forEach(building => enqueue({ type: 'ENTITY_ADDED', entity: assignFaction(building, faction) }));
+    const unitPositions = [{ x: base.x + 1, y: base.y + 1 }, { x: base.x + 2, y: base.y + 1 }];
+    unitPositions.forEach((position, index) => {
+      const unit = createUnit(position.x, position.y, faction.color, 'land', index === 1 ? { weapon: 'bow' } : {});
+      enqueue({ type: 'ENTITY_ADDED', entity: assignFaction(unit, faction) });
+    });
+  };
+
   const addFaction = () => {
     const id = nextFactionId++;
     const palette = ['#f97316', '#06b6d4', '#eab308', '#ec4899', '#a3e635'];
-    factions.value.push({ id, name: `Фракция ${id}`, color: palette[(id - 3) % palette.length]!, isEnemy: true });
+    const faction: Faction = { id, name: `Фракция ${id}`, color: palette[(id - 3) % palette.length]!, isEnemy: true };
+    factions.value.push(faction);
+    createFactionBase(faction);
     return id;
   };
 
@@ -482,38 +529,47 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     const faction = factions.value.find(item => item.id === id);
     if (!faction || id === 1 && changes.isEnemy) return;
     Object.assign(faction, changes);
-    const teamId = faction.isEnemy ? 'enemy' : 'player';
+    const teamId = factionTeamId(faction);
     entities.value.filter(entity => entity.factionId === id).forEach(entity => { entity.groupId = teamId; });
   };
 
   const removeFaction = (id: number) => {
     if (id === 1) return;
-    entities.value.filter(entity => entity.factionId === id).forEach(entity => enqueue({ type: 'ENTITY_REMOVED', entityId: entity.id }));
+    const factionEntities = entities.value.filter(entity => entity.factionId === id);
+    factionEntities.forEach(entity => enqueue({ type: 'ENTITY_REMOVED', entityId: entity.id }));
     factions.value = factions.value.filter(faction => faction.id !== id);
+    // Apply queued removals immediately so deleted factions disappear in the editor.
+    if (factionEntities.length) void processFrame(0);
   };
 
   const spawnFactionUnit = (factionId: number) => {
     const faction = factions.value.find(item => item.id === factionId);
     if (!faction) return;
-    const center = isoToWorld(cameraX.value, cameraY.value);
-    const angle = Math.random() * Math.PI * 2;
-    const unit = createUnit(center.x + Math.cos(angle) * 2, center.y + Math.sin(angle) * 2, faction.color);
-    unit.factionId = faction.id;
-    unit.groupId = faction.isEnemy ? 'enemy' : 'player';
-    enqueue({ type: 'ENTITY_ADDED', entity: unit });
+    const base = entities.value.find((entity): entity is Building => entity.kind === 'building' && entity.factionId === factionId);
+    const origin = base ? { x: base.x + 1, y: base.y + 1 } : isoToWorld(cameraX.value, cameraY.value);
+    const position = findNearestTerrainTile(origin.x, origin.y, 'land', (x, y) =>
+      entities.value.some(entity => entity.kind === 'building' && buildingOccupiesTile(entity, x, y)));
+    if (!position) return;
+    const unit = createUnit(position.x, position.y, faction.color);
+    enqueue({ type: 'ENTITY_ADDED', entity: assignFaction(unit, faction) });
   };
 
   const startScenario = () => {
+    // Preserve the editor scene when starting/restarting a scenario.
+    // If a faction has no surviving units, restore its starting squad near its base.
     if (gameStatus.value === 'won' || gameStatus.value === 'lost') {
-      store.dispatch('game/clear');
-      factions.value.forEach((faction, index) => {
-        const teamId = faction.isEnemy ? 'enemy' : 'player';
-        const x = index % 2 === 0 ? -5 : 5;
-        const y = Math.floor(index / 2) * 3 - 2;
-        const unit = createUnit(x, y, faction.color);
-        unit.factionId = faction.id;
-        unit.groupId = teamId;
-        enqueue({ type: 'ENTITY_ADDED', entity: unit });
+      factions.value.forEach(faction => {
+        const hasLivingUnit = entities.value.some(entity => entity.kind === 'unit' && entity.factionId === faction.id);
+        if (hasLivingUnit) return;
+        const base = entities.value.find((entity): entity is Building => entity.kind === 'building' && entity.factionId === faction.id);
+        const origin = base ? { x: base.x + 1, y: base.y + 1 } : { x: faction.id % 2 ? -5 : 5, y: 0 };
+        for (let index = 0; index < 2; index++) {
+          const position = findNearestTerrainTile(origin.x + index, origin.y + 1, 'land', (x, y) =>
+            entities.value.some(entity => entity.kind === 'building' && buildingOccupiesTile(entity, x, y)));
+          if (!position) continue;
+          const unit = createUnit(position.x, position.y, faction.color);
+          enqueue({ type: 'ENTITY_ADDED', entity: assignFaction(unit, faction) });
+        }
       });
     }
     scenarioTime.value = 0;
@@ -546,7 +602,7 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     cameraX, cameraY, zoom,
     viewportW, viewportH,
     entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, selectedProducerCount, PRODUCER_LIMIT,
-    factions, gameStatus, scenarioTime, gameMessage, isGameOver,
+    factions, factionParticipantCount, factionUnitCounts, gameStatus, scenarioTime, gameMessage, isGameOver,
     addFaction, removeFaction, updateFaction, spawnFactionUnit, startScenario, togglePause,
     selectedBoat, passengerCount, disembarkSelected, BOAT_CAPACITY, unitStatus, spawnWeapon, looseFormation, holdSelected, attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
     selectedEntities,
