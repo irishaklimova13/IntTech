@@ -49,6 +49,23 @@
       </div>
     </header>
 
+    <section class="faction-panel" aria-label="Управление фракциями">
+      <strong>Фракции:</strong>
+      <div v-for="faction in factions" :key="faction.id" class="faction-item">
+        <span class="faction-dot" :style="{ background: faction.color }"></span>
+        <span>{{ faction.name }}</span>
+        <span class="faction-role">{{ faction.isEnemy ? 'Враг' : 'Союзник' }}</span>
+        <button class="faction-action" @click="spawnFactionUnit(faction.id)">+ Юнит</button>
+        <button class="faction-action" :disabled="faction.id === 1" @click="updateFaction(faction.id, { isEnemy: !faction.isEnemy })">{{ faction.isEnemy ? 'Сделать союзником' : 'Сделать врагом' }}</button>
+        <button v-if="faction.id !== 1" class="faction-remove" @click="removeFaction(faction.id)" aria-label="Удалить фракцию">×</button>
+      </div>
+      <button class="add-faction" @click="addFaction">+ Добавить фракцию</button>
+      <span class="scenario-clock">{{ gameStatusLabel }} · {{ scenarioTimeLabel }}</span>
+      <button class="scenario-button" @click="startScenario">▶ Запустить сценарий</button>
+      <button class="scenario-button" :disabled="gameStatus !== 'running' && gameStatus !== 'paused'" @click="togglePause">{{ gameStatus === 'paused' ? '▶ Продолжить' : 'Ⅱ Пауза' }}</button>
+    </section>
+    <div v-if="gameStatus !== 'running' && gameMessage" class="game-message" :class="'message-' + gameStatus">{{ gameMessage }}</div>
+
     <div
       ref="viewportRef"
       class="viewport"
@@ -173,6 +190,8 @@ const {
   entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, selectedProducerCount, PRODUCER_LIMIT,
   selectedBoat, passengerCount, disembarkSelected, BOAT_CAPACITY, unitStatus, spawnWeapon, looseFormation, holdSelected, attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
   selectedEntities, selfDestruct,
+  factions, gameStatus, scenarioTime, gameMessage,
+  addFaction, removeFaction, updateFaction, spawnFactionUnit, startScenario, togglePause,
   cameraWorld, zoomDisplay, entityCount,
   zoomAt,
   resetCamera, spawnUnit,
@@ -182,6 +201,14 @@ const {
   beginPan, movePan, endPan,
   init, destroy,
 } = game;
+
+const gameStatusLabel = computed(() => ({
+  ready: 'Ожидание', running: 'Игра идёт', paused: 'Пауза', won: 'Победа', lost: 'Поражение',
+}[gameStatus.value]));
+const scenarioTimeLabel = computed(() => {
+  const total = Math.floor(scenarioTime.value);
+  return `${Math.floor(total / 60).toString().padStart(2, '0')}:${(total % 60).toString().padStart(2, '0')}`;
+});
 
 const isBuildMenuOpen = ref(false);
 const selectedBuildingType = ref<BuildingType | null>(null);
@@ -467,6 +494,17 @@ onUnmounted(() => {
 .projectile { position:absolute; width:1px; height:1px; overflow:visible; pointer-events:none; }
 .combat-visual.projectile { z-index:5; }
 .actions select { color:#e6e9d9; background:#34443c; padding:5px; border:1px solid #69806b; border-radius:4px; font:inherit; }
+.faction-panel { display:flex; align-items:center; flex-wrap:wrap; gap:7px; padding:7px 14px; background:#172b27; border-bottom:1px solid #40564c; color:#e2e8f0; font-size:12px; z-index:8; }
+.faction-item { display:flex; align-items:center; gap:5px; padding:3px 6px; background:#263b34; border-radius:5px; }
+.faction-dot { width:10px; height:10px; border-radius:50%; }
+.faction-role, .scenario-clock { color:#b6c8bd; }
+.faction-action, .faction-remove, .add-faction, .scenario-button { border:1px solid #526b5d; border-radius:4px; padding:4px 7px; color:#f8fafc; background:#344b40; cursor:pointer; font:inherit; }
+.faction-action:disabled, .scenario-button:disabled { opacity:.45; cursor:not-allowed; }
+.faction-remove { color:#fca5a5; font-size:16px; line-height:12px; }
+.add-faction { background:#1d4ed8; border-color:#2563eb; }
+.scenario-button { background:#0f766e; font-weight:600; }
+.game-message { position:absolute; z-index:20; top:150px; left:50%; transform:translateX(-50%); padding:8px 14px; border-radius:6px; color:#f8fafc; background:rgba(15,23,42,.9); border:1px solid #64748b; font-size:13px; pointer-events:none; white-space:nowrap; }
+.message-won { border-color:#22c55e; } .message-lost { border-color:#ef4444; } .message-paused { border-color:#eab308; }
 .rts-container {
   display: flex; flex-direction: column; width: 100%; height: 100vh;
   background: #162b27; color: #f8fafc; overflow: hidden; user-select: none;
