@@ -26,7 +26,7 @@ test('lethal hits create splashes and one set of remains per defeated soldier', 
   const items: CombatVisual[] = [];
   const visuals = createCombatVisuals(items);
   const a = createUnit(0, -6, 'blue'), b = createUnit(1, -6, 'red');
-  b.hp = 20;
+  a.strength = 20; b.hp = 20;
   const actions = createUnitActions([a, b], {}, visuals.add, () => 1);
   actions.attack(a, b);
   for (let i = 0; i < 100; i++) actions.tick(0.01);

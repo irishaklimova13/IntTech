@@ -5,7 +5,7 @@ import { PRODUCER_LIMIT, producerCount, buildingContains, createUnitActions as c
 import type { CombatVisualEvent } from './combatVisuals';
 const createUnitActions = (entities: Entity[], effects: Record<string, UnitEffects>, onVisual?: (event: CombatVisualEvent) => void) => createRandomActions(entities, effects, onVisual, () => 1);
 
-const createUnit = (...args: Parameters<typeof createDefaultUnit>) => { const unit = createDefaultUnit(...args); unit.attackDamage = 20; return unit; };
+const createUnit = (...args: Parameters<typeof createDefaultUnit>) => { const unit = createDefaultUnit(...args); unit.attackDamage = 20; unit.strength = 20; unit.hp = unit.maxHp = 100; unit.weapon = 'spear'; unit.attackRange = 1.2; return unit; };
 
 import { getTerrainAt } from './terrain';
 
@@ -26,7 +26,7 @@ test('spawn inherits producer identity and respects terrain and occupancy', () =
 });
 
 test('water producer creates only water units, full neighborhood refuses spawn', () => {
-  const harbor = createBuilding(2, 4, 'cyan');
+  const harbor = createBuilding(2, -2, 'cyan');
   harbor.spawnType = 'water';
   const entities: Entity[] = [harbor];
   let count = 0;
@@ -142,10 +142,10 @@ test('idle allies protect their building; moving allies keep their orders', () =
 });
 
 test('out of range during windup cancels impact; unreachable target is abandoned', () => {
-  const a = createUnit(0, 0, 'blue'), b = createUnit(1, 0, 'red');
+  const a = createUnit(0, -3, 'blue'), b = createUnit(1, -3, 'red');
   const actions = createUnitActions([a, b], {});
   actions.attack(a, b); advance(actions, 0.1);
-  b.x = 5; b.y = 4;
+  b.x = 0; b.y = 0;
   advance(actions, 2.6);
   assert.equal(b.hp, 100); assert.equal(actions.isAttacking(a.id), false);
 });

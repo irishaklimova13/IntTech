@@ -2,8 +2,13 @@ import type { TerrainType } from './entities';
 import type { Point } from './pathfinding';
 
 export const MAP_RADIUS = 12;
-export const POND_CENTER = { x: 5, y: 4 };
-export const POND_RADII = { x: 4.2, y: 3.2 };
+export const RIVER_BRIDGES = [-6, 6];
+export const riverCenter = (x: number) => 1.35 * Math.sin(x * .32);
+export const riverWidth = (x: number) => 1.65 + .2 * Math.cos(x * .45);
+export const isRiverTile = (x: number, y: number) => isInsideMap(x, y) && Math.abs(y - riverCenter(x)) <= riverWidth(x);
+export const isBridgeTile = (x: number, y: number) => isRiverTile(Math.round(x), Math.round(y)) && RIVER_BRIDGES.includes(Math.round(x));
+export const canTraverseTerrain = (x: number, y: number, type: TerrainType) =>
+  getTerrainAt(Math.round(x), Math.round(y)) === type || (type === 'land' && isBridgeTile(x, y));
 
 export interface MapTile extends Point {
   terrain: TerrainType;
@@ -14,9 +19,7 @@ export const isInsideMap = (x: number, y: number): boolean =>
 
 export const getTerrainAt = (x: number, y: number): TerrainType | null => {
   if (!isInsideMap(x, y)) return null;
-  const nx = (x - POND_CENTER.x) / POND_RADII.x;
-  const ny = (y - POND_CENTER.y) / POND_RADII.y;
-  return nx * nx + ny * ny <= 1 ? 'water' : 'land';
+  return isRiverTile(x, y) ? 'water' : 'land';
 };
 
 export const getMapTiles = (): MapTile[] => {
@@ -46,7 +49,7 @@ export const findNearestTerrainTile = (
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
         const x = originX + dx;
         const y = originY + dy;
-        if (getTerrainAt(x, y) !== terrain || isOccupied(x, y)) continue;
+        if (!canTraverseTerrain(x, y, terrain) || isOccupied(x, y)) continue;
         const distance = (x - startX) ** 2 + (y - startY) ** 2;
         if (distance < bestDistance) {
           bestDistance = distance;

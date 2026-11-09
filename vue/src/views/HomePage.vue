@@ -10,10 +10,14 @@
       <div class="actions">
         <template v-if="selectedBuilding">
           <span class="spawn-label">{{ selectedBuilding.spawnType === 'water' ? 'Причал' : selectedBuilding.name }} · {{ selectedProducerCount }}/{{ PRODUCER_LIMIT }}</span>
-          <button class="btn-reset" :disabled="selectedProducerCount >= PRODUCER_LIMIT" @click="spawnUnit()">Создать {{ selectedBuilding.spawnType === 'water' ? 'водного юнита' : 'солдата' }}</button>
+          <select v-if="selectedBuilding.spawnType !== 'water'" v-model="spawnWeapon" aria-label="Тип бойца"><option v-for="w in LAND_WEAPONS" :key="w" :value="w">{{ WEAPONS[w].name }}</option></select>
+          <button class="btn-reset" :disabled="selectedProducerCount >= PRODUCER_LIMIT" @click="spawnUnit()">{{ selectedBuilding.spawnType === 'water' ? 'Спустить лодку' : 'Нанять бойца' }}</button>
         </template>
         <span v-else class="spawn-label">Выберите здание для спавна</span>
         <span role="status">{{ spawnMessage }}</span>
+        <button v-if="selectedBoat" class="btn-reset" :disabled="!passengerCount" title="Высадка до четырёх бойцов на свободный берег рядом" @click="disembarkSelected">Высадить ({{ passengerCount }}/{{ BOAT_CAPACITY }})</button>
+        <button class="btn-reset" title="Оставаться на месте и атаковать только доступных врагов" @click="holdSelected">Держать позицию</button>
+        <button class="btn-reset" :aria-pressed="looseFormation" @click="looseFormation = !looseFormation">{{ looseFormation ? 'Рассыпной строй' : 'Обычный строй' }}</button>
         <button class="btn-reset" title="35% HP за 2 с. Враги должны быть дальше 3 клеток. Перерыв 12 с." @click="healSelected">Выпить лекарство</button>
         <span role="status" class="heal-message">{{ healMessage }}</span>
         <button class="btn-reset" title="Следующий приказ движения будет с атакой" :aria-pressed="attackMoveMode" :class="{ 'mode-active': attackMoveMode }" @click="attackMoveMode = !attackMoveMode">Идти с атакой</button>
@@ -36,6 +40,7 @@
 
       <div class="hints">
         <span>{{ selectedBuildingType ? 'ЛКМ — Построить · ПКМ/Esc — Отмена' : 'ЛКМ — Выбрать' }}</span> ·
+        <span>ПКМ по своей лодке — Посадка · ПКМ со зданием — Точка сбора</span> ·
         <span>Зажать ЛКМ — Рамка</span> ·
         <span>ПКМ — Идти / атаковать · Ctrl+ПКМ — Идти с атакой</span> ·
         <span>Shift + ПКМ — Очередь</span> ·
@@ -60,6 +65,7 @@
         <!-- Карта: отдельные клетки суши и воды -->
         <div v-for="tile in mapTiles" :key="'tile-' + tile.x + '-' + tile.y" class="terrain-tile" :class="'terrain-' + tile.terrain" :style="terrainTileStyle(tile.x, tile.y)"></div>
 
+        <div v-for="d in decorViews" :key="d.id" class="landscape-decor" :class="d.kind" :style="{ left: d.left + 'px', top: d.top + 'px' }"><LandscapeDecor :kind="d.kind" :variant="d.variant" /></div>
         <!-- Пути -->
         <svg class="paths-layer" width="100%" height="100%">
           <g v-for="p in unitPaths" :key="'path-' + p.id">
@@ -71,10 +77,6 @@
           </g>
         </svg>
 
-        <div class="origin" :style="{ left: (viewportW / 2 - cameraX) + 'px', top: (viewportH / 2 - cameraY) + 'px' }">
-          <span class="origin-label">(0, 0)</span>
-        </div>
-
         <div v-for="m in markerViews" :key="'m' + m.id" class="marker" :style="{ left: m.left + 'px', top: m.top + 'px' }"></div>
 
         <div
@@ -85,19 +87,23 @@
         ></div>
 
         <div v-for="fx in combatVisualViews" :key="'combat-' + fx.id" class="combat-visual" :class="fx.kind" :style="{ left: fx.left + 'px', top: fx.top + 'px', opacity: fx.kind === 'death' ? Math.min(1, fx.ttl / 2) : 1 }">
-          <CombatRemains :kind="fx.kind" :color="fx.color" :seed="fx.id" :ultimate="fx.ultimate" />
+          <CombatRemains v-if="fx.kind !== 'projectile'" :kind="fx.kind" :color="fx.color" :seed="fx.id" :ultimate="fx.ultimate" />
+          <svg v-else class="projectile" aria-hidden="true"><g :transform="`translate(${fx.arrowX} ${fx.arrowY - 20}) rotate(${fx.arrowAngle})`"><path d="M-16 0 H2 M-2 -2 L3 0 L-2 2" fill="none" stroke="#e5d8b1" stroke-width="1.6" /><path d="M-15 -2 L-12 0 L-15 2" fill="none" stroke="#7b5640" stroke-width="1.3" /></g></svg>
         </div>
+        <div v-if="rallyView" class="rally-point" :style="{ left:rallyView.left+'px',top:rallyView.top+'px',color:selectedBuilding?.color }"><svg viewBox="0 0 28 38" aria-label="Точка сбора"><ellipse cx="10" cy="34" rx="9" ry="3" fill="none" stroke="currentColor" stroke-dasharray="2 2" /><path d="M10 34 V5" stroke="#e8dcc1" stroke-width="2" /><path d="M11 5 L25 9 L11 17 Z" fill="currentColor" /></svg></div>
         <!-- Сущности -->
-        <div v-for="v in entityViews" :key="v.id" class="entity" :style="{ left: v.left + 'px', top: v.top + 'px' }">
+        <div v-for="v in entityViews" :key="v.id" class="entity" :style="{ left: v.left + 'px', top: v.top + 'px', zIndex: v.ent.kind === 'unit' && v.ent.movementType === 'water' && isBridgeTile(v.ent.x,v.ent.y) ? 0 : 2 }">
           <UnitSprite
             v-if="v.ent.kind === 'unit'"
             :color="v.ent.color"
-            :is-moving="v.ent.path.length > 0"
+            :is-moving="v.ent.pose?.moving ?? false"
+            :pose="v.ent.pose" :weapon="v.ent.weapon" :movement-type="v.ent.movementType"
+            :health-ratio="v.ent.hp / v.ent.maxHp" :holding="v.ent.stance === 'hold'"
             :is-selected="v.ent.isSelected"
             :hit="(effects[v.id]?.hit ?? 0) > 0"
             :rest="(effects[v.id]?.rest ?? 0) > 0 && v.ent.path.length === 0"
             :strike="(effects[v.id]?.strike ?? 0) > 0"
-            :facing-left="effects[v.id]?.facingLeft"
+            :facing-left="isAttacking(v.id) ? effects[v.id]?.facingLeft : undefined"
             :healing="(effects[v.id]?.healing ?? 0) > 0"
             :ultimate="(effects[v.id]?.ultimate ?? 0) > 0"
           />
@@ -127,11 +133,10 @@
         @contextmenu.stop.prevent
       >
         <section v-for="entity in selectedEntities" :key="entity.id">
-          <strong>{{ entity.kind === 'unit' ? 'Персонаж' : entity.name }}</strong>
-          <small>{{ entity.id }}</small>
+          <strong>{{ entity.kind === 'unit' ? WEAPONS[entity.weapon ?? 'spear'].name : entity.name }}</strong>
           <div>Здоровье: {{ entity.health }} / {{ entity.maxHealth }}</div>
           <template v-if="entity.kind === 'unit'">
-            <div>Сила: {{ entity.strength }}</div>
+            <div class="unit-status">{{ unitStatus(entity) }}</div><div>{{ WEAPONS[entity.weapon ?? 'spear'].role }}</div><div>Сила: {{ entity.strength }} · Дальность: {{ entity.attackRange }}</div>
             <div>Скорость передвижения: {{ entity.movementSpeed }}</div>
             <div>Скорость атаки: {{ entity.attackSpeed }}</div>
             <button type="button" @click="selfDestruct(entity.id)">Самоуничтожение</button>
@@ -149,6 +154,10 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRtsGame } from '../game/useRtsGame';
 import { worldToIso, TILE_H, TILE_W } from '../game/iso';
 import type { Unit } from '../game/entities';
+import { WEAPONS, LAND_WEAPONS } from '../game/weapons';
+import { isBridgeTile } from '../game/terrain';
+import { tileColor, landscapeDecor } from '../game/landscape';
+import LandscapeDecor from '../components/LandscapeDecor.vue';
 import { BUILDING_TYPES } from '../game/buildings';
 import type { BuildingType } from '../game/entities';
 import UnitSprite from '../components/UnitSprite.vue';
@@ -162,7 +171,7 @@ const {
   cameraX, cameraY, zoom,
   viewportW, viewportH,
   entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, selectedProducerCount, PRODUCER_LIMIT,
-  attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
+  selectedBoat, passengerCount, disembarkSelected, BOAT_CAPACITY, unitStatus, spawnWeapon, looseFormation, holdSelected, attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
   selectedEntities, selfDestruct,
   cameraWorld, zoomDisplay, entityCount,
   zoomAt,
@@ -216,12 +225,23 @@ const worldStyle = computed(() => ({ transform: `scale(${zoom.value})` }));
 
 const terrainTileStyle = (x: number, y: number) => {
   const iso = worldToIso(x, y);
-  return { left: `${iso.x - cameraX.value + viewportW.value / 2}px`, top: `${iso.y - cameraY.value + viewportH.value / 2}px` };
+  return { left: `${iso.x - cameraX.value + viewportW.value / 2}px`, top: `${iso.y - cameraY.value + viewportH.value / 2}px`, backgroundColor: tileColor(x, y) };
 };
 
 // ===== Представления сущностей =====
+const rallyView = computed(() => {
+  const point = selectedBuilding.value?.rallyPoint;
+  if (!point) return null;
+  const iso = worldToIso(point.x,point.y);
+  return { left:iso.x-cameraX.value+viewportW.value/2, top:iso.y-cameraY.value+viewportH.value/2 };
+});
+const decoration = landscapeDecor();
+const decorViews = computed(() => decoration.map(d => {
+  const iso = worldToIso(d.x, d.y);
+  return { ...d, left: iso.x - cameraX.value + viewportW.value / 2, top: iso.y - cameraY.value + viewportH.value / 2 };
+}));
 const entityViews = computed(() => {
-  const list = entities.value.map((ent) => {
+  const list = entities.value.filter(e => e.kind !== 'unit' || !e.transportId).map((ent) => {
     const offset = ent.kind === 'building' ? (ent.sizeTiles - 1) / 2 : 0;
     const iso = worldToIso(ent.x + offset, ent.y + offset);
     return {
@@ -255,7 +275,10 @@ const buildingPreview = computed(() => {
 // ===== Маркеры =====
 const combatVisualViews = computed(() => combatVisuals.value.map(fx => {
   const iso = worldToIso(fx.x, fx.y);
-  return { ...fx, left: iso.x - cameraX.value + viewportW.value / 2,
+  const from = worldToIso(fx.fromX ?? fx.x, fx.fromY ?? fx.y);
+  const progress = 1 - fx.ttl / fx.duration;
+  return { ...fx, arrowX: (from.x - iso.x) * (1 - progress), arrowY: (from.y - iso.y) * (1 - progress),
+    arrowAngle: Math.atan2(iso.y - from.y, iso.x - from.x) * 180 / Math.PI, left: iso.x - cameraX.value + viewportW.value / 2,
     top: iso.y - cameraY.value + viewportH.value / 2 };
 }));
 
@@ -436,9 +459,17 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.landscape-decor { position:absolute; pointer-events:none; z-index:0; }
+.rally-point { position:absolute; width:28px; height:38px; transform:translate(-10px,-34px); pointer-events:none; z-index:3; }
+.unit-status { color:#bde4ac; }
+.landscape-decor.bridge { z-index:1; }
+.landscape-decor.tree { z-index:2; }
+.projectile { position:absolute; width:1px; height:1px; overflow:visible; pointer-events:none; }
+.combat-visual.projectile { z-index:5; }
+.actions select { color:#e6e9d9; background:#34443c; padding:5px; border:1px solid #69806b; border-radius:4px; font:inherit; }
 .rts-container {
   display: flex; flex-direction: column; width: 100%; height: 100vh;
-  background: #0f172a; color: #f8fafc; overflow: hidden; user-select: none;
+  background: #162b27; color: #f8fafc; overflow: hidden; user-select: none;
   font-family: ui-monospace, Menlo, Consolas, monospace;
 }
 
@@ -498,13 +529,13 @@ onUnmounted(() => {
 .actions .build-options button.selected { border-color: #4ade80; background: #166534; }
 .build-options small { color: #cbd5e1; }
 
-.viewport { flex: 1; position: relative; overflow: hidden; background: #111827; cursor: crosshair; touch-action: none; }
+.viewport { flex: 1; position: relative; overflow: hidden; background: #203d35; cursor: crosshair; touch-action: none; }
 .grid { position: absolute; inset: 0; pointer-events: none; }
 .world { position: absolute; inset: 0; transform-origin: center center; will-change: transform; pointer-events: none; }
 
 .terrain-tile { position: absolute; width: 64px; height: 32px; transform: translate(-50%, -50%); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); border: 1px solid rgba(15, 23, 42, 0.45); box-sizing: border-box; }
-.terrain-land { background: linear-gradient(135deg, #365b42, #294936); }
-.terrain-water { background: linear-gradient(135deg, #0e7490, #164e63); }
+.terrain-land { background:#54744c; }
+.terrain-water { background:#397e7e; }
 .paths-layer { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 1; }
 
 .origin { position: absolute; width: 10px; height: 10px; background: #f59e0b; border-radius: 50%; transform: translate(-50%, -50%); }
