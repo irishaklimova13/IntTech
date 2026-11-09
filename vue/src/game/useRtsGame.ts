@@ -36,6 +36,33 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
   const viewportH = ref(0);
   const mapTiles = computed(() => gameState.value.mapTiles);
 
+  const selectedEntities = computed(() => entities.value.filter((entity) => entity.isSelected));
+
+  const destroyEntity = (id: string): boolean => {
+    const index = entities.value.findIndex((entity) => entity.id === id);
+    if (index < 0) return false;
+    const entity = entities.value[index]!;
+    entity.health = 0;
+    entity.isSelected = false;
+    entity.path = [];
+    enqueue({ type: 'ENTITY_REMOVED', entityId: id });
+    return true;
+  };
+
+  const applyDamage = (id: string, amount: number): boolean => {
+    const entity = entities.value.find((candidate) => candidate.id === id);
+    if (!entity || !Number.isFinite(amount) || amount < 0) return false;
+    entity.health -= amount;
+    if (entity.health === 0) destroyEntity(id);
+    return true;
+  };
+
+  const selfDestruct = (id: string): boolean => {
+    const unit = entities.value.find((entity) => entity.id === id);
+    if (!unit || unit.kind !== 'unit' || !unit.isSelected) return false;
+    return destroyEntity(id);
+  };
+
   interface Marker { id: number; x: number; y: number; born: number }
   const markers = ref<Marker[]>([]);
   let markerSeq = 0;
@@ -418,6 +445,8 @@ export const useRtsGame = (random: () => number = Math.random, suppliedStore?: S
     viewportW, viewportH,
     entities, markers, mapTiles, effects, combatVisuals, selectedBuilding, selectedProducerCount, PRODUCER_LIMIT,
     attackMoveMode, healSelected, healMessage, spawnMessage, isAttacking,
+    selectedEntities,
+    applyDamage, destroyEntity, selfDestruct,
     cameraWorld, zoomDisplay, entityCount,
     screenToIso, isoToScreen, worldToScreen, screenToWorld,
     selectAt, selectInBox, commandMoveTo,
