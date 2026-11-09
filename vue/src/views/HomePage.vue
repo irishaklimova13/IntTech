@@ -223,7 +223,7 @@ const terrainTileViews = computed(() => {
     const adjacentTerrains = neighbors.map(([dx, dy]) => terrainByCoordinate.get(`${tile.x + dx},${tile.y + dy}`));
     const hasWaterNeighbor = adjacentTerrains.includes('water');
     const hasLandNeighbor = adjacentTerrains.includes('land');
-    const seed = Math.abs((tile.x * 73856093) ^ (tile.y * 19349663)) % 3;
+    const seed = Math.abs((tile.x * 73856093) ^ (tile.y * 19349663)) % 6;
 
     return {
       ...tile,
@@ -519,48 +519,73 @@ onUnmounted(() => {
 .build-options small { color: #cbd5e1; }
 
 .viewport { flex: 1; position: relative; overflow: hidden; background: #111827; cursor: crosshair; touch-action: none; }
-.grid { position: absolute; inset: 0; pointer-events: none; }
+.grid { position: absolute; inset: 0; pointer-events: none; opacity: .22; }
 .world { position: absolute; inset: 0; transform-origin: center center; will-change: transform; pointer-events: none; }
 
 .terrain-tile {
-  position: absolute; width: 64px; height: 32px; transform: translate(-50%, -50%);
+  position: absolute; width: 66px; height: 34px; transform: translate(-50%, -50%);
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  border: 1px solid rgba(15, 23, 42, 0.38); box-sizing: border-box; overflow: hidden;
+  box-sizing: border-box; overflow: hidden;
 }
 .terrain-tile::before, .terrain-tile::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;
 }
 .terrain-land {
-  background-color: #31583d;
+  background-color: #496b3d;
   background-image:
-    radial-gradient(ellipse at 22% 32%, rgba(190, 220, 145, .24) 0 1px, transparent 2px),
-    radial-gradient(ellipse at 72% 68%, rgba(13, 42, 29, .28) 0 1px, transparent 2px),
-    linear-gradient(135deg, #52764a 0%, #3b6543 48%, #294936 100%);
+    radial-gradient(ellipse at 18% 24%, rgba(170, 190, 105, .30) 0%, rgba(170, 190, 105, .12) 24%, transparent 48%),
+    radial-gradient(ellipse at 76% 72%, rgba(24, 53, 31, .34) 0%, rgba(24, 53, 31, .12) 30%, transparent 58%),
+    radial-gradient(ellipse at 54% 42%, rgba(116, 139, 70, .22) 0%, transparent 52%),
+    linear-gradient(145deg, #587747 0%, #496b3d 52%, #36583a 100%);
 }
 .terrain-land::before {
-  background: repeating-linear-gradient(118deg, transparent 0 8px, rgba(190, 220, 145, .07) 9px, transparent 10px 17px);
-  opacity: .8;
-}
-.terrain-land.terrain-variant-1 { background-position: 5px 2px, 13px 8px, 0 0; filter: brightness(1.06); }
-.terrain-land.terrain-variant-2 { background-position: 11px 7px, 3px 12px, 0 0; filter: brightness(.96); }
-.terrain-water {
-  background-color: #075b78;
   background-image:
-    radial-gradient(ellipse at 30% 28%, rgba(186, 230, 253, .3), transparent 38%),
-    repeating-radial-gradient(ellipse at 72% 60%, transparent 0 7px, rgba(165, 224, 244, .11) 8px, transparent 9px 15px),
-    linear-gradient(145deg, #2693aa 0%, #08728d 48%, #123f60 100%);
+    radial-gradient(ellipse at 28% 62%, rgba(205, 194, 132, .20) 0 1px, transparent 3px),
+    radial-gradient(ellipse at 68% 28%, rgba(27, 45, 26, .24) 0 1px, transparent 3px),
+    radial-gradient(ellipse at 82% 76%, rgba(191, 205, 128, .16) 0 1px, transparent 2px);
+  opacity: .75;
+}
+.terrain-land.terrain-variant-1 { background-position: 3px 7px, 11px 1px, 0 0, 0 0; }
+.terrain-land.terrain-variant-2 { background-position: 13px 2px, 2px 10px, 8px 4px, 0 0; }
+.terrain-land.terrain-variant-3 { background-position: 8px 11px, 15px 3px, 2px 7px, 0 0; }
+.terrain-land.terrain-variant-4 { background-position: 1px 4px, 8px 12px, 14px 1px, 0 0; }
+.terrain-land.terrain-variant-5 { background-position: 12px 8px, 4px 2px, 7px 11px, 0 0; }
+.terrain-water {
+  background-color: #07516d;
+  background-image:
+    radial-gradient(ellipse at 24% 26%, rgba(129, 205, 218, .34) 0%, rgba(75, 161, 184, .14) 26%, transparent 54%),
+    radial-gradient(ellipse at 78% 76%, rgba(2, 35, 63, .38) 0%, transparent 58%),
+    radial-gradient(ellipse at 58% 42%, rgba(40, 135, 160, .30) 0%, transparent 52%),
+    linear-gradient(145deg, #247e91 0%, #0b617b 48%, #073e5c 100%);
 }
 .terrain-water::before {
-  background: repeating-linear-gradient(165deg, transparent 0 6px, rgba(219, 245, 255, .12) 7px, transparent 8px 15px);
+  background-image:
+    radial-gradient(ellipse 13px 2px at 26% 35%, rgba(205, 240, 241, .22), transparent 100%),
+    radial-gradient(ellipse 9px 1.5px at 72% 64%, rgba(180, 225, 232, .18), transparent 100%),
+    radial-gradient(ellipse 7px 1px at 48% 82%, rgba(210, 241, 239, .15), transparent 100%);
+  opacity: .9;
 }
-.terrain-water.terrain-variant-1 { background-position: 8px 3px, 14px 7px, 0 0; filter: brightness(1.08); }
-.terrain-water.terrain-variant-2 { background-position: 2px 9px, 5px 13px, 0 0; filter: brightness(.94); }
-.terrain-shore::after {
-  inset: 2px; border: 1px solid rgba(238, 211, 157, .62); opacity: .8;
-  box-shadow: inset 0 0 0 1px rgba(129, 98, 57, .18);
+.terrain-water.terrain-variant-1 { background-position: 8px 2px, 2px 9px, 12px 4px, 0 0; }
+.terrain-water.terrain-variant-2 { background-position: 1px 8px, 12px 2px, 4px 11px, 0 0; }
+.terrain-water.terrain-variant-3 { background-position: 11px 5px, 5px 12px, 1px 3px, 0 0; }
+.terrain-water.terrain-variant-4 { background-position: 4px 12px, 9px 4px, 13px 8px, 0 0; }
+.terrain-water.terrain-variant-5 { background-position: 14px 3px, 1px 7px, 8px 12px, 0 0; }
+.terrain-shore {
+  background-image:
+    radial-gradient(ellipse at 24% 34%, rgba(218, 198, 143, .42) 0%, rgba(190, 169, 112, .20) 30%, transparent 62%),
+    radial-gradient(ellipse at 76% 72%, rgba(102, 91, 56, .20) 0%, transparent 54%),
+    linear-gradient(145deg, #8b9560 0%, #687d4b 48%, #496b3d 100%);
+}
+.terrain-shore::before {
+  background-image:
+    radial-gradient(ellipse at 34% 62%, rgba(225, 211, 164, .32) 0 1px, transparent 3px),
+    radial-gradient(ellipse at 72% 28%, rgba(67, 76, 43, .22) 0 1px, transparent 3px);
 }
 .terrain-water-edge::after {
-  inset: 3px; border: 1px solid rgba(186, 230, 253, .24); opacity: .75;
+  background-image:
+    radial-gradient(ellipse 9px 2px at 20% 24%, rgba(207, 239, 239, .34), transparent 100%),
+    radial-gradient(ellipse 7px 1.5px at 72% 72%, rgba(207, 239, 239, .25), transparent 100%);
+  opacity: .85;
 }
 .paths-layer { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 1; }
 
