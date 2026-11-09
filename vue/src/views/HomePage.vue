@@ -60,6 +60,24 @@
         <!-- Карта: отдельные клетки суши и воды -->
         <div v-for="tile in terrainTileViews" :key="'tile-' + tile.x + '-' + tile.y" class="terrain-tile" :class="['terrain-' + tile.terrain, { 'terrain-shore': tile.shore, 'terrain-water-edge': tile.waterEdge }, 'terrain-variant-' + tile.variant]" :style="terrainTileStyle(tile.x, tile.y)"></div>
 
+        <!-- Декор местности: только визуальный слой, без влияния на игровую логику -->
+        <svg class="terrain-trails" width="100%" height="100%" aria-hidden="true">
+          <path :d="terrainTrailPath" class="trail-shadow" />
+          <path :d="terrainTrailPath" class="trail-earth" />
+          <path :d="terrainTrailPath" class="trail-worn-center" />
+        </svg>
+        <div
+          v-for="decoration in terrainDecorationViews"
+          :key="'decoration-' + decoration.x + '-' + decoration.y"
+          class="terrain-decoration"
+          :class="'decoration-' + decoration.kind"
+          :style="terrainTileStyle(decoration.x, decoration.y)"
+          aria-hidden="true"
+        >
+          <span class="decoration-shape"></span>
+          <span class="decoration-detail"></span>
+        </div>
+
         <!-- Пути -->
         <svg class="paths-layer" width="100%" height="100%">
           <g v-for="p in unitPaths" :key="'path-' + p.id">
@@ -238,6 +256,42 @@ const terrainTileStyle = (x: number, y: number) => {
   const iso = worldToIso(x, y);
   return { left: `${iso.x - cameraX.value + viewportW.value / 2}px`, top: `${iso.y - cameraY.value + viewportH.value / 2}px` };
 };
+
+// Извилистая грунтовая тропа проходит по суше южнее водоёма.
+// Координаты используются только для отрисовки, на карту и перемещение они не влияют.
+const trailYAt = (x: number) =>
+  -5 + Math.sin((x + 11) * 0.22) * 0.62 + Math.sin((x + 11) * 0.47) * 0.16;
+
+const terrainTrailPath = computed(() => {
+  const points: string[] = [];
+  for (let x = -11; x <= 11.001; x += 0.5) {
+    const iso = worldToIso(x, trailYAt(x));
+    const screenX = iso.x - cameraX.value + viewportW.value / 2;
+    const screenY = iso.y - cameraY.value + viewportH.value / 2;
+    points.push(`${points.length === 0 ? 'M' : 'L'} ${screenX.toFixed(1)} ${screenY.toFixed(1)}`);
+  }
+  return points.join(' ');
+});
+
+// Декор размещается детерминированно по координатам.
+// Берег и полоса тропы оставляются свободными; объекты не участвуют в коллизиях.
+const terrainDecorationViews = computed(() => {
+  return terrainTileViews.value.flatMap((tile) => {
+    if (tile.terrain !== 'land' || tile.shore) return [];
+    if (Math.abs(tile.y - trailYAt(tile.x)) < 1.35) return [];
+
+    const hash = Math.abs((tile.x * 73856093) ^ (tile.y * 19349663));
+    const roll = hash % 100;
+    const cluster = (Math.sin(tile.x * 1.71 + tile.y * 2.13) + 1) / 2;
+    let kind: 'tree' | 'pine' | 'bush' | 'rock' | null = null;
+
+    if (roll < 3 && cluster > 0.22) kind = hash % 2 === 0 ? 'tree' : 'pine';
+    else if (roll >= 3 && roll < 12 && cluster > 0.12) kind = 'bush';
+    else if (roll >= 12 && roll < 17) kind = 'rock';
+
+    return kind ? [{ x: tile.x, y: tile.y, kind }] : [];
+  });
+});
 
 // ===== Представления сущностей =====
 const entityViews = computed(() => {
@@ -587,6 +641,89 @@ onUnmounted(() => {
     radial-gradient(ellipse 7px 1.5px at 72% 72%, rgba(207, 239, 239, .25), transparent 100%);
   opacity: .85;
 }
+/* Декоративная тропа: несколько полупрозрачных слоёв создают грунт и истоптанную середину. */
+.terrain-trails { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 1; }
+.terrain-trails path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.trail-shadow { stroke: rgba(35, 30, 20, .24); stroke-width: 15px; }
+.trail-earth { stroke: #786044; stroke-width: 11px; }
+.trail-worn-center { stroke: rgba(190, 159, 111, .48); stroke-width: 5px; stroke-dasharray: 2 5; }
+
+/* Объекты природы привязаны к центру клетки и рисуются под юнитами. */
+.terrain-decoration {
+  position: absolute; z-index: 1; pointer-events: none;
+  transform: translate(-50%, -88%);
+}
+.decoration-shape, .decoration-detail { position: absolute; display: block; }
+.decoration-tree, .decoration-pine { width: 36px; height: 58px; }
+.decoration-tree::before, .decoration-pine::before {
+  content: ''; position: absolute; left: 3px; bottom: 1px; width: 31px; height: 9px;
+  border-radius: 50%; background: rgba(20, 32, 20, .30); filter: blur(2px);
+}
+.decoration-tree::after, .decoration-pine::after {
+  content: ''; position: absolute; left: 15px; bottom: 4px; width: 7px; height: 20px;
+  background: linear-gradient(90deg, #493522, #8b6840 48%, #3e2b1e);
+  clip-path: polygon(20% 0, 85% 0, 100% 100%, 0 100%);
+}
+.decoration-tree .decoration-shape {
+  left: 2px; bottom: 17px; width: 33px; height: 34px; border-radius: 48% 52% 45% 55%;
+  background:
+    radial-gradient(ellipse at 30% 25%, rgba(174, 190, 105, .9), transparent 31%),
+    radial-gradient(ellipse at 72% 34%, #527d3d 0 23%, transparent 48%),
+    radial-gradient(ellipse at 43% 66%, #315d35 0 34%, transparent 62%),
+    radial-gradient(ellipse at 68% 76%, #244b2e 0 24%, transparent 48%),
+    #3d6a37;
+  box-shadow: inset -4px -5px 7px rgba(17, 42, 24, .48), inset 3px 2px 5px rgba(197, 207, 126, .24), 0 2px 2px rgba(15, 30, 18, .35);
+}
+.decoration-tree .decoration-detail {
+  left: 8px; bottom: 34px; width: 19px; height: 11px; border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(190, 205, 126, .48), transparent 72%);
+}
+.decoration-pine .decoration-shape {
+  left: 3px; bottom: 14px; width: 31px; height: 43px;
+  clip-path: polygon(50% 0, 65% 22%, 58% 22%, 82% 48%, 70% 48%, 100% 76%, 62% 76%, 62% 100%, 38% 100%, 38% 76%, 0 76%, 30% 48%, 18% 48%, 42% 22%, 35% 22%);
+  background: linear-gradient(105deg, #183f2b 0%, #47734a 42%, #21482f 72%, #153723 100%);
+  filter: drop-shadow(2px 3px 2px rgba(16, 28, 18, .45));
+}
+.decoration-pine .decoration-detail {
+  left: 16px; bottom: 23px; width: 4px; height: 25px;
+  background: linear-gradient(90deg, #28442a, #718653, #1c3824);
+  opacity: .55;
+}
+.decoration-bush { width: 27px; height: 20px; }
+.decoration-bush::before {
+  content: ''; position: absolute; left: 1px; bottom: 0; width: 25px; height: 7px;
+  border-radius: 50%; background: rgba(24, 34, 20, .28); filter: blur(1.5px);
+}
+.decoration-bush .decoration-shape {
+  left: 2px; bottom: 3px; width: 23px; height: 15px; border-radius: 48%;
+  background:
+    radial-gradient(ellipse at 27% 38%, #82965a 0 15%, transparent 34%),
+    radial-gradient(ellipse at 67% 27%, #557c3e 0 21%, transparent 43%),
+    radial-gradient(ellipse at 47% 68%, #315b32 0 28%, transparent 48%),
+    #426b37;
+  box-shadow: inset -2px -3px 4px rgba(20, 44, 22, .42), 1px 2px 2px rgba(20, 32, 20, .3);
+}
+.decoration-bush .decoration-detail {
+  left: 7px; bottom: 10px; width: 4px; height: 2px; border-radius: 50%;
+  background: rgba(195, 202, 132, .7); box-shadow: 9px 2px rgba(185, 197, 119, .55);
+}
+.decoration-rock { width: 20px; height: 13px; }
+.decoration-rock::before {
+  content: ''; position: absolute; left: 1px; bottom: 0; width: 19px; height: 5px;
+  border-radius: 50%; background: rgba(24, 30, 28, .28); filter: blur(1.2px);
+}
+.decoration-rock .decoration-shape {
+  left: 2px; bottom: 3px; width: 16px; height: 10px;
+  border-radius: 42% 58% 35% 45%;
+  background: linear-gradient(145deg, #b2b4a5 0%, #777e79 35%, #4e5b58 78%, #333f3d 100%);
+  clip-path: polygon(7% 74%, 19% 24%, 49% 0, 83% 21%, 100% 78%, 73% 100%, 22% 96%);
+  box-shadow: inset 2px 1px 2px rgba(255,255,255,.4), 1px 2px 2px rgba(20,30,25,.3);
+}
+.decoration-rock .decoration-detail {
+  left: 7px; bottom: 8px; width: 6px; height: 2px; transform: rotate(-24deg);
+  border-radius: 50%; background: rgba(235, 235, 218, .62);
+}
+
 .paths-layer { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 1; }
 
 .origin { position: absolute; width: 10px; height: 10px; background: #f59e0b; border-radius: 50%; transform: translate(-50%, -50%); }
