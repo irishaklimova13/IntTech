@@ -3,7 +3,7 @@ import type { GameEvent } from '../store/game';
 import { findPath } from './pathfinding';
 import { buildingFootprintsOverlap, buildingOccupiesTile, distanceFromBuildingFootprint } from './buildings';
 import { getTerrainAt, isInsideMap } from './terrain';
-import { movementSpeed } from './entities';
+import { movementSpeed, restoreEntityCharacteristics } from './entities';
 import { spawnFromBuilding, type createUnitActions } from './unitActions';
 type Combat = ReturnType<typeof createUnitActions>;
 
@@ -90,12 +90,12 @@ const applyEvents = (entities: Entity[], events: GameEvent[], combat?: Combat) =
     switch (event.type) {
       case 'ENTITY_ADDED':
         if (!entities.some((entity) => entity.id === event.entity.id)) {
-          entities.push({
+          entities.push(restoreEntityCharacteristics({
             ...event.entity,
             path: event.entity.path.map((point) => ({ ...point })),
             commandsQueue: event.entity.commandsQueue.map((command) => ({ ...command })),
             activeCommand: event.entity.activeCommand ? { ...event.entity.activeCommand } : null,
-          });
+          }));
         }
         break;
       case 'ENTITY_REMOVED': {
@@ -261,7 +261,7 @@ export const advanceFrame = (
   deltaSeconds: number,
   combat?: Combat,
 ): Entity[] => {
-  const entities = currentEntities.map((entity) => ({
+  const entities = currentEntities.map((entity) => restoreEntityCharacteristics({
     ...entity,
     path: entity.path.map((point) => ({ ...point })),
     commandsQueue: entity.commandsQueue.map((command) => ({ ...command })),

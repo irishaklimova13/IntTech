@@ -88,6 +88,20 @@ const healthAccessors = Object.fromEntries(
   ['health', 'maxHealth'].map((key) => [key, Object.getOwnPropertyDescriptor(healthProperties, key)!]),
 );
 
+// Object spread copies accessor values, so frame copies must restore the aliases.
+export const restoreEntityCharacteristics = <T extends Entity>(entity: T): T => {
+  Object.defineProperties(entity, healthAccessors);
+  if (entity.kind === 'unit') {
+    Object.defineProperty(entity, 'movementSpeed', {
+      enumerable: true,
+      configurable: true,
+      get(this: Unit): number { return this.speed; },
+      set(this: Unit, value: number) { this.speed = nonNegative(value, this.speed); },
+    });
+  }
+  return entity;
+};
+
 export interface UnitCharacteristics {
   health?: number;
   maxHealth?: number;
