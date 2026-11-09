@@ -58,7 +58,7 @@
 
       <div class="world" :style="worldStyle">
         <!-- Карта: отдельные клетки суши и воды -->
-        <div v-for="tile in mapTiles" :key="'tile-' + tile.x + '-' + tile.y" class="terrain-tile" :class="'terrain-' + tile.terrain" :style="terrainTileStyle(tile.x, tile.y)"></div>
+        <div v-for="tile in terrainTileViews" :key="'tile-' + tile.x + '-' + tile.y" class="terrain-tile" :class="['terrain-' + tile.terrain, { 'terrain-shore': tile.shore, 'terrain-water-edge': tile.waterEdge }, 'terrain-variant-' + tile.variant]" :style="terrainTileStyle(tile.x, tile.y)"></div>
 
         <!-- Пути -->
         <svg class="paths-layer" width="100%" height="100%">
@@ -213,6 +213,26 @@ const gridStyle = computed(() => {
 });
 
 const worldStyle = computed(() => ({ transform: `scale(${zoom.value})` }));
+
+const terrainTileViews = computed(() => {
+  const tiles = mapTiles.value;
+  const terrainByCoordinate = new Map(tiles.map((tile) => [`${tile.x},${tile.y}`, tile.terrain]));
+  const neighbors = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+
+  return tiles.map((tile) => {
+    const adjacentTerrains = neighbors.map(([dx, dy]) => terrainByCoordinate.get(`${tile.x + dx},${tile.y + dy}`));
+    const hasWaterNeighbor = adjacentTerrains.includes('water');
+    const hasLandNeighbor = adjacentTerrains.includes('land');
+    const seed = Math.abs((tile.x * 73856093) ^ (tile.y * 19349663)) % 3;
+
+    return {
+      ...tile,
+      shore: tile.terrain === 'land' && hasWaterNeighbor,
+      waterEdge: tile.terrain === 'water' && hasLandNeighbor,
+      variant: seed,
+    };
+  });
+});
 
 const terrainTileStyle = (x: number, y: number) => {
   const iso = worldToIso(x, y);
@@ -502,9 +522,46 @@ onUnmounted(() => {
 .grid { position: absolute; inset: 0; pointer-events: none; }
 .world { position: absolute; inset: 0; transform-origin: center center; will-change: transform; pointer-events: none; }
 
-.terrain-tile { position: absolute; width: 64px; height: 32px; transform: translate(-50%, -50%); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); border: 1px solid rgba(15, 23, 42, 0.45); box-sizing: border-box; }
-.terrain-land { background: linear-gradient(135deg, #365b42, #294936); }
-.terrain-water { background: linear-gradient(135deg, #0e7490, #164e63); }
+.terrain-tile {
+  position: absolute; width: 64px; height: 32px; transform: translate(-50%, -50%);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  border: 1px solid rgba(15, 23, 42, 0.38); box-sizing: border-box; overflow: hidden;
+}
+.terrain-tile::before, .terrain-tile::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+}
+.terrain-land {
+  background-color: #31583d;
+  background-image:
+    radial-gradient(ellipse at 22% 32%, rgba(190, 220, 145, .24) 0 1px, transparent 2px),
+    radial-gradient(ellipse at 72% 68%, rgba(13, 42, 29, .28) 0 1px, transparent 2px),
+    linear-gradient(135deg, #52764a 0%, #3b6543 48%, #294936 100%);
+}
+.terrain-land::before {
+  background: repeating-linear-gradient(118deg, transparent 0 8px, rgba(190, 220, 145, .07) 9px, transparent 10px 17px);
+  opacity: .8;
+}
+.terrain-land.terrain-variant-1 { background-position: 5px 2px, 13px 8px, 0 0; filter: brightness(1.06); }
+.terrain-land.terrain-variant-2 { background-position: 11px 7px, 3px 12px, 0 0; filter: brightness(.96); }
+.terrain-water {
+  background-color: #075b78;
+  background-image:
+    radial-gradient(ellipse at 30% 28%, rgba(186, 230, 253, .3), transparent 38%),
+    repeating-radial-gradient(ellipse at 72% 60%, transparent 0 7px, rgba(165, 224, 244, .11) 8px, transparent 9px 15px),
+    linear-gradient(145deg, #2693aa 0%, #08728d 48%, #123f60 100%);
+}
+.terrain-water::before {
+  background: repeating-linear-gradient(165deg, transparent 0 6px, rgba(219, 245, 255, .12) 7px, transparent 8px 15px);
+}
+.terrain-water.terrain-variant-1 { background-position: 8px 3px, 14px 7px, 0 0; filter: brightness(1.08); }
+.terrain-water.terrain-variant-2 { background-position: 2px 9px, 5px 13px, 0 0; filter: brightness(.94); }
+.terrain-shore::after {
+  inset: 2px; border: 1px solid rgba(238, 211, 157, .62); opacity: .8;
+  box-shadow: inset 0 0 0 1px rgba(129, 98, 57, .18);
+}
+.terrain-water-edge::after {
+  inset: 3px; border: 1px solid rgba(186, 230, 253, .24); opacity: .75;
+}
 .paths-layer { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 1; }
 
 .origin { position: absolute; width: 10px; height: 10px; background: #f59e0b; border-radius: 50%; transform: translate(-50%, -50%); }
