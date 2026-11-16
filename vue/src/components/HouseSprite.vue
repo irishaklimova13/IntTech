@@ -32,8 +32,10 @@ const props = defineProps<{
   color: string;
 }>();
 
+const buildingScale = computed(() => 1 + (props.sizeTiles - 1) * 0.45);
+
 const houseStyle = computed(() => ({
-  transform: `scale(${1 + (props.sizeTiles - 1) * 0.45})`,
+  transform: `scale(${buildingScale.value})`,
   transformOrigin: 'bottom center',
   '--building-color': props.color,
 }));
@@ -43,14 +45,14 @@ const footprintStyle = computed(() => ({
   height: `${32 * props.sizeTiles}px`,
   left: `${-32 * props.sizeTiles}px`,
   bottom: `${-16 * props.sizeTiles}px`,
-  backgroundColor: props.color,
+  backgroundColor: 'rgba(0, 0, 0, 0.16)',
 }));
 
 const shadowStyle = computed(() => ({
-  width: `${64 * props.sizeTiles}px`,
-  height: `${32 * props.sizeTiles}px`,
-  left: `${-32 * props.sizeTiles + 8}px`,
-  bottom: `${-12 * props.sizeTiles}px`,
+  width: `${64 * buildingScale.value + 10}px`,
+  height: `${32 * buildingScale.value + 8}px`,
+  left: `${-32 * buildingScale.value + 12}px`,
+  bottom: '-10px',
 }));
 
 const ringStyle = computed(() => ({
@@ -66,16 +68,17 @@ const ringStyle = computed(() => ({
   position: absolute;
   transform: rotate(26.565deg) skewX(-36.87deg) scaleY(0.707);
   transform-origin: center;
-  opacity: 0.5;
-  filter: brightness(0.7);
+  opacity: 0.28;
+  filter: blur(1px);
 }
 
 .building-shadow {
   position: absolute;
   transform: rotate(26.565deg) skewX(-36.87deg) scaleY(0.707);
   transform-origin: center;
-  background: rgba(0, 0, 0, 0.24);
-  filter: blur(2px);
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 48%;
+  filter: blur(5px);
   pointer-events: none;
 }
 
