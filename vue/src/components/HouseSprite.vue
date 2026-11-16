@@ -55,12 +55,16 @@ const shadowStyle = computed(() => ({
   bottom: '-10px',
 }));
 
-const ringStyle = computed(() => ({
-  width: `${84 * props.sizeTiles}px`,
-  height: `${42 * props.sizeTiles}px`,
-  left: `${-42 * props.sizeTiles}px`,
-  bottom: `${-6 * props.sizeTiles}px`,
-}));
+const ringStyle = computed(() => {
+  const width = 64 * buildingScale.value + 8;
+  const height = 18 * buildingScale.value + 4;
+  return {
+    width: `${width}px`,
+    height: `${height}px`,
+    left: `${-width / 2}px`,
+    top: `${-height / 2}px`,
+  };
+});
 </script>
 
 <style scoped>
@@ -84,9 +88,12 @@ const ringStyle = computed(() => ({
 
 .building-ring {
   position: absolute;
+  border: 1.5px solid #b6e3a4;
   border-radius: 50%;
-  border: 2px dashed #22c55e;
+  box-shadow: 0 0 0 2px rgba(32, 58, 44, 0.5);
+  background: rgba(182, 227, 164, 0.035);
   box-sizing: border-box;
+  pointer-events: none;
   z-index: 10;
 }
 
