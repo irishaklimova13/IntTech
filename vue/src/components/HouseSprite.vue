@@ -1,7 +1,7 @@
 <template>
   <div class="building-footprint" :style="footprintStyle"></div>
   <div class="building-shadow" :style="shadowStyle"></div>
-  <div v-if="isSelected" class="building-ring building-ring-back" :style="ringStyle"></div>
+  <div class="building-ring" v-if="isSelected" :style="ringStyle"></div>
 
   <div class="house" :class="{ 'is-hit': hit }" :style="houseStyle">
     <div class="house-base"></div>
@@ -19,8 +19,6 @@
       <div class="chimney-top"></div>
     </div>
   </div>
-
-  <div v-if="isSelected" class="building-ring building-ring-front" :style="ringStyle"></div>
 </template>
 
 <script setup lang="ts">
@@ -95,14 +93,6 @@ const ringStyle = computed(() => {
   box-shadow: 0 0 0 2px rgba(32, 58, 44, 0.5);
   box-sizing: border-box;
   pointer-events: none;
-}
-
-.building-ring-back {
-  clip-path: inset(0 0 50% 0);
-}
-
-.building-ring-front {
-  clip-path: inset(50% 0 0 0);
 }
 
 .house {
