@@ -12,8 +12,12 @@
     <div class="wall-right">
       <div class="wall-window"></div>
     </div>
-    <div class="roof-left"></div>
-    <div class="roof-right"></div>
+    <svg class="roof" viewBox="0 0 72 34" aria-hidden="true">
+      <polygon class="roof-face-left" points="4,18 36,1 36,33 4,28" />
+      <polygon class="roof-face-right" points="36,1 68,18 68,28 36,33" />
+      <path class="roof-ridge" d="M36 1 V33" />
+      <path class="roof-eave" d="M4 28 L36 33 L68 28" />
+    </svg>
     <span v-if="smoke" class="heart-smoke" aria-hidden="true">♥</span>
     <div class="chimney">
       <div class="chimney-top"></div>
@@ -168,32 +172,38 @@ const ringStyle = computed(() => {
   right: 9px;
 }
 
-.roof-left {
+.roof {
   position: absolute;
-  width: 35px;
-  height: 20px;
-  bottom: 26px;
-  left: 0;
-  background: #b91c1c;
-  border-left: 1px solid #7f1d1d;
-  transform-origin: bottom left;
-  transform: skewY(26.56deg);
-  clip-path: polygon(0 100%, 100% 100%, 100% 0);
+  left: -4px;
+  top: 6px;
+  width: 72px;
+  height: 34px;
+  overflow: visible;
   z-index: 2;
+  pointer-events: none;
 }
 
-.roof-right {
-  position: absolute;
-  width: 35px;
-  height: 20px;
-  bottom: 26px;
-  right: 0;
-  background: #991b1b;
-  border-right: 1px solid #7f1d1d;
-  transform-origin: bottom right;
-  transform: skewY(-26.56deg);
-  clip-path: polygon(0 100%, 100% 100%, 0 0);
-  z-index: 2;
+.roof-face-left {
+  fill: #b91c1c;
+  stroke: #7f1d1d;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.roof-face-right {
+  fill: #991b1b;
+  stroke: #7f1d1d;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.roof-ridge,
+.roof-eave {
+  fill: none;
+  stroke: #7f1d1d;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .chimney {
