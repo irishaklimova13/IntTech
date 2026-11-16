@@ -47,10 +47,10 @@ const footprintStyle = computed(() => ({
 }));
 
 const shadowStyle = computed(() => ({
-  width: `${80 * props.sizeTiles}px`,
-  height: `${40 * props.sizeTiles}px`,
-  left: `${-40 * props.sizeTiles}px`,
-  bottom: `${-4 * props.sizeTiles}px`,
+  width: `${64 * props.sizeTiles}px`,
+  height: `${32 * props.sizeTiles}px`,
+  left: `${-32 * props.sizeTiles + 8}px`,
+  bottom: `${-12 * props.sizeTiles}px`,
 }));
 
 const ringStyle = computed(() => ({
@@ -72,8 +72,11 @@ const ringStyle = computed(() => ({
 
 .building-shadow {
   position: absolute;
-  background: rgba(0, 0, 0, 0.4);
-  border-radius: 50%;
+  transform: rotate(26.565deg) skewX(-36.87deg) scaleY(0.707);
+  transform-origin: center;
+  background: rgba(0, 0, 0, 0.24);
+  filter: blur(2px);
+  pointer-events: none;
 }
 
 .building-ring {
