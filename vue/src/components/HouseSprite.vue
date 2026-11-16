@@ -12,8 +12,12 @@
     <div class="wall-right">
       <div class="wall-window"></div>
     </div>
-    <div class="roof-left"></div>
-    <div class="roof-right"></div>
+    <svg class="roof" viewBox="0 0 72 46" aria-hidden="true">
+      <polygon class="roof-face-left" points="3,28 36,1 36,45 -1,28" />
+      <polygon class="roof-face-right" points="36,1 69,28 65,28 36,45" />
+      <path class="roof-ridge" d="M36 1 V45" />
+      <path class="roof-eave" d="M-1 28 L36 45 L65 28" />
+    </svg>
     <span v-if="smoke" class="heart-smoke" aria-hidden="true">♥</span>
     <div class="chimney">
       <div class="chimney-top"></div>
@@ -32,8 +36,10 @@ const props = defineProps<{
   color: string;
 }>();
 
+const buildingScale = computed(() => 1 + (props.sizeTiles - 1) * 0.45);
+
 const houseStyle = computed(() => ({
-  transform: `scale(${1 + (props.sizeTiles - 1) * 0.45})`,
+  transform: `scale(${buildingScale.value})`,
   transformOrigin: 'bottom center',
   '--building-color': props.color,
 }));
@@ -43,22 +49,26 @@ const footprintStyle = computed(() => ({
   height: `${32 * props.sizeTiles}px`,
   left: `${-32 * props.sizeTiles}px`,
   bottom: `${-16 * props.sizeTiles}px`,
-  backgroundColor: props.color,
+  backgroundColor: 'rgba(0, 0, 0, 0.16)',
 }));
 
 const shadowStyle = computed(() => ({
-  width: `${80 * props.sizeTiles}px`,
-  height: `${40 * props.sizeTiles}px`,
-  left: `${-40 * props.sizeTiles}px`,
-  bottom: `${-4 * props.sizeTiles}px`,
+  width: `${64 * buildingScale.value + 10}px`,
+  height: `${32 * buildingScale.value + 8}px`,
+  left: `${-32 * buildingScale.value + 12}px`,
+  bottom: '-10px',
 }));
 
-const ringStyle = computed(() => ({
-  width: `${84 * props.sizeTiles}px`,
-  height: `${42 * props.sizeTiles}px`,
-  left: `${-42 * props.sizeTiles}px`,
-  bottom: `${-6 * props.sizeTiles}px`,
-}));
+const ringStyle = computed(() => {
+  const width = 64 * buildingScale.value;
+  const height = 17 * buildingScale.value;
+  return {
+    width: `${width}px`,
+    height: `${height}px`,
+    left: `${-width / 2}px`,
+    top: `${-height / 2}px`,
+  };
+});
 </script>
 
 <style scoped>
@@ -66,22 +76,27 @@ const ringStyle = computed(() => ({
   position: absolute;
   transform: rotate(26.565deg) skewX(-36.87deg) scaleY(0.707);
   transform-origin: center;
-  opacity: 0.5;
-  filter: brightness(0.7);
+  opacity: 0.28;
+  filter: blur(1px);
 }
 
 .building-shadow {
   position: absolute;
-  background: rgba(0, 0, 0, 0.4);
-  border-radius: 50%;
+  transform: rotate(26.565deg) skewX(-36.87deg) scaleY(0.707);
+  transform-origin: center;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 48%;
+  filter: blur(5px);
+  pointer-events: none;
 }
 
 .building-ring {
   position: absolute;
+  border: 1.5px solid #b6e3a4;
   border-radius: 50%;
-  border: 2px dashed #22c55e;
+  box-shadow: 0 0 0 2px rgba(32, 58, 44, 0.5);
   box-sizing: border-box;
-  z-index: 10;
+  pointer-events: none;
 }
 
 .house {
@@ -157,54 +172,63 @@ const ringStyle = computed(() => ({
   right: 9px;
 }
 
-.roof-left {
+.roof {
   position: absolute;
-  width: 35px;
-  height: 20px;
-  bottom: 26px;
-  left: 0;
-  background: #b91c1c;
-  border-left: 1px solid #7f1d1d;
-  transform-origin: bottom left;
-  transform: skewY(26.56deg);
-  clip-path: polygon(0 100%, 100% 100%, 100% 0);
+  left: -3px;
+  top: 11px;
+  width: 72px;
+  height: 46px;
+  overflow: visible;
   z-index: 2;
+  pointer-events: none;
 }
 
-.roof-right {
-  position: absolute;
-  width: 35px;
-  height: 20px;
-  bottom: 26px;
-  right: 0;
-  background: #991b1b;
-  border-right: 1px solid #7f1d1d;
-  transform-origin: bottom right;
-  transform: skewY(-26.56deg);
-  clip-path: polygon(0 100%, 100% 100%, 0 0);
-  z-index: 2;
+.roof-face-left,
+.roof-face-right {
+  fill: var(--building-color, #eab308);
+  stroke: rgba(35, 35, 35, 0.35);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.roof-face-right {
+  filter: brightness(0.78);
+}
+
+.roof-ridge,
+.roof-eave {
+  fill: none;
+  stroke: #7f1d1d;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .chimney {
   position: absolute;
   width: 8px;
   height: 16px;
-  background: #71717a;
-  bottom: 36px;
-  left: 16px;
-  border: 1px solid #3f3f46;
-  z-index: 1;
+  left: 11px;
+  top: 20px;
+  box-sizing: border-box;
+  background: linear-gradient(90deg, #85858b 0 45%, #62626a 46% 100%);
+  border: 1px solid #414149;
+  border-bottom: 0;
+  z-index: 3;
 }
 
 .chimney-top {
   position: absolute;
-  top: -3px;
-  left: -2px;
-  width: 10px;
-  height: 4px;
-  background: #52525b;
-  border: 1px solid #27272a;
+  top: -4px;
+  left: -3px;
+  width: 12px;
+  height: 5px;
+  box-sizing: border-box;
+  background: #a1a1aa;
+  border: 1px solid #414149;
+  border-radius: 1px;
   transform: skewX(-26.56deg);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
 }
 .heart-smoke { position:absolute; left:12px; bottom:53px; z-index:5; color:#fda4af; font-size:18px; pointer-events:none; animation:heart-smoke 1.5s ease-out forwards; }
 @keyframes heart-smoke { from { opacity:0; transform:scale(.4); } 20% { opacity:.85; } to { opacity:0; transform:translate(10px,-38px) scale(1.3); } }
