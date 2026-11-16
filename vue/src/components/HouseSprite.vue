@@ -175,7 +175,7 @@ const ringStyle = computed(() => {
 .roof {
   position: absolute;
   left: -4px;
-  top: 6px;
+  top: 10px;
   width: 72px;
   height: 34px;
   overflow: visible;
@@ -183,18 +183,16 @@ const ringStyle = computed(() => {
   pointer-events: none;
 }
 
-.roof-face-left {
-  fill: #b91c1c;
-  stroke: #7f1d1d;
+.roof-face-left,
+.roof-face-right {
+  fill: var(--building-color, #eab308);
+  stroke: rgba(35, 35, 35, 0.35);
   stroke-width: 1;
   stroke-linejoin: round;
 }
 
 .roof-face-right {
-  fill: #991b1b;
-  stroke: #7f1d1d;
-  stroke-width: 1;
-  stroke-linejoin: round;
+  filter: brightness(0.78);
 }
 
 .roof-ridge,
@@ -210,22 +208,27 @@ const ringStyle = computed(() => {
   position: absolute;
   width: 8px;
   height: 16px;
-  background: #71717a;
-  bottom: 36px;
-  left: 16px;
-  border: 1px solid #3f3f46;
-  z-index: 1;
+  left: 15px;
+  bottom: 42px;
+  box-sizing: border-box;
+  background: linear-gradient(90deg, #85858b 0 45%, #62626a 46% 100%);
+  border: 1px solid #414149;
+  border-bottom: 0;
+  z-index: 3;
 }
 
 .chimney-top {
   position: absolute;
-  top: -3px;
-  left: -2px;
-  width: 10px;
-  height: 4px;
-  background: #52525b;
-  border: 1px solid #27272a;
+  top: -4px;
+  left: -3px;
+  width: 12px;
+  height: 5px;
+  box-sizing: border-box;
+  background: #a1a1aa;
+  border: 1px solid #414149;
+  border-radius: 1px;
   transform: skewX(-26.56deg);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
 }
 .heart-smoke { position:absolute; left:12px; bottom:53px; z-index:5; color:#fda4af; font-size:18px; pointer-events:none; animation:heart-smoke 1.5s ease-out forwards; }
 @keyframes heart-smoke { from { opacity:0; transform:scale(.4); } 20% { opacity:.85; } to { opacity:0; transform:translate(10px,-38px) scale(1.3); } }
