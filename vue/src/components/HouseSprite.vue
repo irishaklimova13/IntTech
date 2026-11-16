@@ -174,8 +174,8 @@ const ringStyle = computed(() => {
 
 .roof {
   position: absolute;
-  left: -4px;
-  top: 10px;
+  left: -3px;
+  top: 11px;
   width: 72px;
   height: 46px;
   overflow: visible;
@@ -208,8 +208,8 @@ const ringStyle = computed(() => {
   position: absolute;
   width: 8px;
   height: 16px;
-  left: 15px;
-  bottom: 42px;
+  left: 11px;
+  top: 20px;
   box-sizing: border-box;
   background: linear-gradient(90deg, #85858b 0 45%, #62626a 46% 100%);
   border: 1px solid #414149;
