@@ -1,3 +1,7 @@
+const PROJECTILE_DURATION = 0.2;
+const DEATH_DURATION = 15;
+const ULTIMATE_DURATION = 0.22;
+const HIT_DURATION = 0.6;
 export interface CombatVisualEvent {
   kind: 'hit' | 'death' | 'ultimate' | 'projectile'; ultimate?: boolean; fromX?: number; fromY?: number; x: number; y: number; color: string;
 }
@@ -12,7 +16,13 @@ export function createCombatVisuals(items: CombatVisual[]) {
         const splash = items.findIndex(e => e.kind !== 'death');
         items.splice(splash < 0 ? 0 : splash, 1);
       }
-      const duration = event.kind === 'projectile' ? 0.2 : event.kind === 'death' ? 15 : event.kind === 'ultimate' ? 0.22 : 0.6;
+      const duration = event.kind === 'projectile'
+        ? PROJECTILE_DURATION
+        : event.kind === 'death'
+          ? DEATH_DURATION
+          : event.kind === 'ultimate'
+            ? ULTIMATE_DURATION
+            : HIT_DURATION;
       items.push({ ...event, id: ++sequence, ttl: duration, duration });
     },
     tick(dt: number) {

@@ -29,7 +29,7 @@ test('attackers reserve distinct melee positions and release them on cancellatio
 });
 
 // Drive the actual game's frame loop, movement and collisions, without DOM rendering.
-function battlefield(random: () => number = () => 1, mixed = false) {
+const battlefield = (random: () => number = () => 1, mixed = false) => {
   let frame: FrameRequestCallback = () => {};
   Object.assign(globalThis, {
     window: new EventTarget(),
@@ -82,7 +82,7 @@ function battlefield(random: () => number = () => 1, mixed = false) {
     game.commandMoveTo(p.x, p.y, false, attack);
   };
   return { game, armies, step, command, timings };
-}
+};
 
 test('20 vs 20: terrain, buildings, target changes and frame cost over 60 simulated seconds', () => {
   const b = battlefield();
