@@ -12,11 +12,11 @@
     <div class="wall-right">
       <div class="wall-window"></div>
     </div>
-    <svg class="roof" viewBox="0 0 72 34" aria-hidden="true">
-      <polygon class="roof-face-left" points="4,18 36,1 36,33 4,28" />
-      <polygon class="roof-face-right" points="36,1 68,18 68,28 36,33" />
-      <path class="roof-ridge" d="M36 1 V33" />
-      <path class="roof-eave" d="M4 28 L36 33 L68 28" />
+    <svg class="roof" viewBox="0 0 72 46" aria-hidden="true">
+      <polygon class="roof-face-left" points="3,28 36,1 36,45 -1,28" />
+      <polygon class="roof-face-right" points="36,1 69,28 65,28 36,45" />
+      <path class="roof-ridge" d="M36 1 V45" />
+      <path class="roof-eave" d="M-1 28 L36 45 L65 28" />
     </svg>
     <span v-if="smoke" class="heart-smoke" aria-hidden="true">♥</span>
     <div class="chimney">
@@ -177,7 +177,7 @@ const ringStyle = computed(() => {
   left: -4px;
   top: 10px;
   width: 72px;
-  height: 34px;
+  height: 46px;
   overflow: visible;
   z-index: 2;
   pointer-events: none;
