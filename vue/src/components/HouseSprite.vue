@@ -56,8 +56,8 @@ const shadowStyle = computed(() => ({
 }));
 
 const ringStyle = computed(() => {
-  const width = 64 * buildingScale.value + 8;
-  const height = 18 * buildingScale.value + 4;
+  const width = 64 * buildingScale.value;
+  const height = 17 * buildingScale.value;
   return {
     width: `${width}px`,
     height: `${height}px`,
@@ -91,10 +91,8 @@ const ringStyle = computed(() => {
   border: 1.5px solid #b6e3a4;
   border-radius: 50%;
   box-shadow: 0 0 0 2px rgba(32, 58, 44, 0.5);
-  background: rgba(182, 227, 164, 0.035);
   box-sizing: border-box;
   pointer-events: none;
-  z-index: 10;
 }
 
 .house {
